@@ -644,6 +644,7 @@ async function openDeal(id) {
       <div style="margin-top:18px;display:flex;gap:10px;flex-wrap:wrap;">
         <button class="btn-gold" onclick="shareDeal('${d.id}')">🔗 Share Deal Page</button>
         <button class="btn-ghost" onclick='showDealForm(${JSON.stringify(d.id)})'>✏️ Edit</button>
+        <button class="btn-ghost" onclick="deleteDeal('${d.id}')" style="color:#e07a77;border-color:rgba(217,83,79,.4);">🗑️ Delete</button>
         <select id="stage-select" onchange="setStage('${d.id}', this.value)" style="padding:10px 12px;border-radius:10px;border:1px solid #22385a;background:#0b1626;color:#e9edf3;font-size:14px;">
           ${DEAL_STAGES.map(s => `<option value="${s.id}" ${d.stage === s.id ? 'selected' : ''}>${s.label}</option>`).join('')}
         </select>
@@ -684,6 +685,7 @@ async function openDeal(id) {
             <div class="n">${money(o.amount)} <span style="font-weight:400;color:#8a97a8;">— ${esc(o.buyerName || 'Unknown buyer')}</span></div>
             <div class="w">${o.emd ? 'EMD ' + money(o.emd) + ' · ' : ''}${o.closeDate ? 'Close ' + esc(fmtDate(o.closeDate)) + ' · ' : ''}${esc(o.status || 'pending')}${o.notes ? ' · ' + esc(o.notes) : ''}</div>
           </div>
+          <button class="btn-ghost" style="padding:6px 10px;min-height:0;" onclick="event.stopPropagation();deleteOffer('${d.id}','${o.id}')">✕</button>
         </div>`).join('') : '<div class="timeline-empty">No offers yet.</div>'}</div>
       <button class="btn-gold" style="margin-top:10px;" onclick="showOfferForm('${d.id}')">+ Log Offer</button>
     </div>
@@ -700,6 +702,29 @@ async function openDeal(id) {
     </div>
   </div>`;
   window.scrollTo(0, 0);
+}
+async function deleteOffer(dealId, offerId) {
+  if (!confirm('Delete this offer?')) return;
+  await db.collection('dispoOffers').doc(offerId).delete();
+  await logActivity(dealId, 'Offer deleted');
+  showToast('Offer deleted');
+  openDeal(dealId);
+}
+async function deleteDeal(id) {
+  const d = deals.find(x => x.id === id);
+  if (!confirm(`Delete the deal "${d ? d.address : ''}" and ALL its offers, comps, and activity? This cannot be undone.`)) return;
+  showToast('Deleting deal…');
+  const wipe = async (coll) => {
+    const snap = await db.collection(coll).where('dealId', '==', id).get();
+    for (const doc of snap.docs) await db.collection(coll).doc(doc.id).delete();
+  };
+  await wipe('dispoOffers');
+  await wipe('dispoComps');
+  await wipe('dispoActivity');
+  await db.collection('dispoDeals').doc(id).delete();
+  showToast('Deal deleted');
+  await loadAll();
+  switchTab('deals');
 }
 async function setStage(id, stage) {
   await db.collection('dispoDeals').doc(id).set({ stage, updatedAt: new Date().toISOString() }, { merge: true });
