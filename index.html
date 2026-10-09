@@ -1,0 +1,853 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Dispo Hub — Deal Disposition CRM</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700&family=Inter:wght@400;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    background: #0a1423; color: #e9edf3; font-family: 'Inter', -apple-system, sans-serif;
+    min-height: 100vh; overflow-x: hidden;
+  }
+  .mono { font-family: 'JetBrains Mono', monospace; }
+
+  /* ===== Header ===== */
+  .header {
+    border-bottom: 1px solid #16283f; padding: 20px 28px 0; position: sticky; top: 0;
+    background: rgba(10,20,35,.92); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); z-index: 20;
+    transition: transform .25s ease, opacity .25s ease;
+  }
+  .header::after {
+    content: ''; display: block; height: 1px; margin: 14px -28px 0;
+    background: linear-gradient(90deg, transparent, rgba(212,168,67,.4), transparent);
+  }
+  .header-inner, .content { max-width: 1120px; margin: 0 auto; }
+  .header-inner { display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap; }
+  .brand h1 { font-family: 'Cinzel', serif; font-size: 25px; font-weight: 700; color: #e8c476; letter-spacing: .02em; }
+  .brand .sub { font-size: 11px; letter-spacing: .18em; color: #d4a843; font-weight: 700; text-transform: uppercase; margin-bottom: 2px; }
+  .header-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+
+  .btn-gold {
+    background: linear-gradient(180deg, #e3b95c, #c9992f); color: #0d1b2e; border: 1px solid rgba(255,255,255,.14);
+    border-radius: 10px; padding: 10px 20px; font-weight: 700; font-size: 14px; cursor: pointer; font-family: inherit;
+    box-shadow: 0 2px 10px rgba(212,168,67,.22), inset 0 1px 0 rgba(255,255,255,.25);
+  }
+  .btn-gold:hover { transform: translateY(-1px); box-shadow: 0 4px 16px rgba(212,168,67,.32); }
+  .btn-ghost {
+    background: rgba(255,255,255,.03); border: 1px solid #22385a; color: #c7d2e0; border-radius: 10px;
+    padding: 10px 16px; font-size: 13px; font-weight: 600; cursor: pointer; font-family: inherit;
+  }
+  .btn-ghost:hover { border-color: rgba(212,168,67,.5); color: #e8c476; }
+
+  .content { padding: 18px 20px 80px; }
+
+  /* ===== Tabs ===== */
+  .tabs { display: flex; gap: 6px; margin: 4px 0 16px; border-bottom: 1px solid #16283f; }
+  .tab-btn {
+    background: none; border: none; color: #8a97a8; font-size: 15px; font-weight: 700; padding: 12px 20px;
+    cursor: pointer; font-family: inherit; border-bottom: 2px solid transparent; margin-bottom: -1px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .tab-btn.active { color: #e8c476; border-bottom-color: #d4a843; }
+  .tab-btn .pill { background: rgba(212,168,67,.14); color: #e8c476; font-size: 12px; padding: 2px 10px; border-radius: 12px; font-weight: 700; }
+
+  /* ===== Stage filter row ===== */
+  .stage-row { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
+  .stage-btn {
+    background: rgba(255,255,255,.025); border: 1px solid #22385a; color: #c7d2e0; border-radius: 10px;
+    padding: 9px 15px; font-size: 13px; font-weight: 600; cursor: pointer; font-family: inherit;
+  }
+  .stage-btn:hover { border-color: rgba(212,168,67,.5); color: #e8c476; }
+  .stage-btn.active { border-color: rgba(212,168,67,.6); background: rgba(212,168,67,.09); color: #e8c476; }
+  .stage-btn .count { font-family: 'JetBrains Mono', monospace; font-variant-numeric: tabular-nums; }
+
+  /* ===== Deal cards ===== */
+  .deal-card {
+    background: linear-gradient(180deg, #1e3a5f, #1a3355); border: 1px solid #2a4a73; border-radius: 16px;
+    overflow: hidden; margin-bottom: 12px; box-shadow: 0 4px 14px rgba(0,0,0,.35); cursor: pointer;
+    transition: transform .18s ease, border-color .18s ease;
+  }
+  .deal-card:hover { transform: translateY(-2px); border-color: rgba(212,168,67,.4); }
+  .deal-row { padding: 14px 16px; }
+  .deal-top { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .deal-addr { font-weight: 800; font-size: 17px; }
+  .stage-badge { font-size: 11px; font-weight: 700; padding: 3px 10px; border-radius: 20px; border: 1px solid; white-space: nowrap; }
+  .deal-sub { font-size: 13px; color: #aeb9c7; margin-top: 5px; }
+  .deal-numbers { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 10px; }
+  .deal-num .l { font-size: 10px; text-transform: uppercase; letter-spacing: .08em; color: #8a97a8; }
+  .deal-num .v { font-size: 16px; font-weight: 800; color: #e8c476; font-family: 'JetBrains Mono', monospace; }
+  .deal-num .v.green { color: #4caf82; }
+  .deal-meta { display: flex; gap: 12px; margin-top: 10px; font-size: 12px; color: #8a97a8; flex-wrap: wrap; }
+  .urgent { color: #e07a77; font-weight: 700; }
+
+  /* ===== Buyer cards ===== */
+  .buyer-card {
+    background: linear-gradient(180deg, #1e3a5f, #1a3355); border: 1px solid #2a4a73; border-radius: 16px;
+    padding: 14px 16px; margin-bottom: 12px; box-shadow: 0 4px 14px rgba(0,0,0,.35); cursor: pointer;
+  }
+  .buyer-card:hover { border-color: rgba(212,168,67,.4); }
+  .buyer-top { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .buyer-name { font-weight: 800; font-size: 16px; }
+  .buyer-type { font-size: 11px; font-weight: 700; padding: 3px 10px; border-radius: 20px; background: rgba(143,192,228,.12); color: #8fc0e4; border: 1px solid rgba(143,192,228,.4); }
+  .buyer-type.llc { background: rgba(212,168,67,.12); color: #e8c476; border-color: rgba(212,168,67,.4); }
+  .buyer-contact { margin-top: 8px; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .call-link { font-size: 15px; color: #e8c476; font-weight: 700; text-decoration: none; }
+  .buyer-buybox { font-size: 13px; color: #aeb9c7; margin-top: 8px; font-style: italic; }
+  .buyer-stats { display: flex; gap: 14px; margin-top: 8px; font-size: 12px; color: #8a97a8; flex-wrap: wrap; }
+  .buyer-stats b { color: #e8c476; }
+  .inactive-tag { font-size: 11px; font-weight: 700; padding: 3px 10px; border-radius: 20px; background: rgba(217,83,79,.12); color: #e07a77; border: 1px solid rgba(217,83,79,.4); }
+
+  /* ===== Detail view ===== */
+  .detail-wrap { max-width: 720px; margin: 0 auto; }
+  .back-btn { background: none; border: none; color: #8a97a8; font-size: 14px; cursor: pointer; margin-bottom: 12px; font-family: inherit; }
+  .back-btn:hover { color: #e8c476; }
+  .detail-card { background: linear-gradient(180deg, #1e3a5f, #182c49); border: 1px solid #2a4a73; border-radius: 18px; padding: 22px; margin-bottom: 14px; }
+  .detail-card h2 { font-size: 22px; margin-bottom: 4px; }
+  .detail-card .addr-sub { color: #aeb9c7; font-size: 14px; margin-bottom: 14px; }
+  .num-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; margin: 14px 0; }
+  .num-box { background: rgba(0,0,0,.25); border: 1px solid #22385a; border-radius: 12px; padding: 12px; }
+  .num-box .l { font-size: 10px; text-transform: uppercase; letter-spacing: .08em; color: #8a97a8; }
+  .num-box .v { font-size: 19px; font-weight: 800; color: #e8c476; font-family: 'JetBrains Mono', monospace; margin-top: 4px; }
+  .num-box .v.green { color: #4caf82; }
+  .num-box input { width: 100%; background: transparent; border: none; color: #e8c476; font-family: 'JetBrains Mono', monospace; font-size: 19px; font-weight: 800; outline: none; }
+  .section-label { font-size: 11px; letter-spacing: .14em; text-transform: uppercase; color: #d4a843; font-weight: 700; margin: 18px 0 10px; }
+  .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .form-field label { display: block; font-size: 11px; color: #8a97a8; margin-bottom: 5px; font-weight: 600; }
+  .form-field input, .form-field select, .form-field textarea {
+    width: 100%; padding: 10px 12px; border-radius: 10px; border: 1px solid #22385a;
+    background: #0b1626; color: #e9edf3; font-size: 14px; font-family: inherit;
+  }
+  .form-field textarea { resize: vertical; min-height: 70px; }
+  .form-field input:focus, .form-field select:focus, .form-field textarea:focus { border-color: #d4a843; outline: none; }
+
+  /* Timeline */
+  .timeline { display: flex; flex-direction: column; }
+  .timeline-item { padding: 10px 0; border-bottom: 1px solid #1a2f4d; font-size: 14px; }
+  .timeline-item:last-child { border-bottom: none; }
+  .timeline-ts { color: #8a97a8; font-size: 12px; }
+  .timeline-empty { color: #5c6b82; font-size: 13px; padding: 12px 0; font-style: italic; }
+
+  /* Match list */
+  .match-row { display: flex; align-items: center; gap: 12px; padding: 12px; border: 1px solid #22385a; border-radius: 12px; margin-bottom: 8px; background: rgba(0,0,0,.2); }
+  .match-score { font-family: 'JetBrains Mono', monospace; font-weight: 800; font-size: 18px; color: #e8c476; min-width: 52px; text-align: center; }
+  .match-info { flex: 1; min-width: 0; }
+  .match-info .n { font-weight: 700; font-size: 14px; }
+  .match-info .w { font-size: 12px; color: #8a97a8; margin-top: 2px; }
+  .match-call { flex-shrink: 0; }
+
+  .empty-state { text-align: center; color: #5c6b82; padding: 40px 20px; font-size: 14px; }
+  .toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); background: #16294a; border: 1px solid #d4a843; color: #e8c476; padding: 12px 22px; border-radius: 12px; font-weight: 700; z-index: 9999; display: none; }
+  .toolbar { display: flex; gap: 8px; margin-bottom: 14px; flex-wrap: wrap; align-items: center; }
+  .search-wrap { position: relative; flex: 1 1 220px; }
+  .search-wrap input { width: 100%; padding: 11px 12px 11px 38px; border-radius: 10px; border: 1px solid #22385a; background: #0b1626; color: #e9edf3; font-size: 14px; }
+  .search-wrap span { position: absolute; left: 12px; top: 11px; }
+
+  /* ===== Mobile ===== */
+  @media (max-width: 640px) {
+    body { padding-left: env(safe-area-inset-left); padding-right: env(safe-area-inset-right); }
+    .header { padding: 14px 14px 0; }
+    .header.header-hidden { transform: translateY(-110%); opacity: 0; pointer-events: none; }
+    .brand h1 { font-size: 19px; }
+    .content { padding: 14px 12px calc(60px + env(safe-area-inset-bottom)); }
+    .tabs { overflow-x: auto; }
+    .tab-btn { padding: 12px 14px; font-size: 14px; flex: 0 0 auto; }
+    .form-grid { grid-template-columns: 1fr; }
+    .form-field input, .form-field select, .form-field textarea { font-size: 16px; padding: 13px 12px; }
+    .btn-gold, .btn-ghost { min-height: 48px; }
+    .deal-numbers { gap: 10px; }
+    .call-link { min-height: 48px; display: inline-flex; align-items: center; font-size: 17px; }
+    .num-grid { grid-template-columns: 1fr 1fr; }
+  }
+</style>
+</head>
+<body>
+<div class="header" id="site-header">
+  <div class="header-inner">
+    <div class="brand">
+      <div class="sub">Disposition CRM</div>
+      <h1>DISPO HUB</h1>
+    </div>
+    <div class="header-actions">
+      <button class="btn-ghost" id="import-buyers-btn" title="Import buyers from Google Sheet">📥 Import Buyers</button>
+      <button class="btn-gold" id="add-deal-btn">+ Add Deal</button>
+    </div>
+  </div>
+  <div class="header-inner">
+    <div class="tabs" style="border-bottom:none; margin: 10px 0 0;">
+      <button class="tab-btn active" data-tab="deals">📦 Deals <span class="pill" id="deals-pill">0</span></button>
+      <button class="tab-btn" data-tab="buyers">🤝 Buyers <span class="pill" id="buyers-pill">0</span></button>
+    </div>
+  </div>
+</div>
+
+<div class="content" id="content"></div>
+<div class="toast" id="toast"></div>
+
+<script>
+/* =========================================================================
+   MARKET DUPLICATION GUIDE — To clone this Dispo CRM for a new market:
+   1. Copy index.html to a new repo (or new branch).
+   2. Update CONFIG below: SHEETS_API_KEY, BUYERS_SHEET_ID.
+   3. Update firebaseConfig below: create a new Firebase project, paste its config.
+   4. Firestore collections (dispoDeals, dispoBuyers, dispoOffers, dispoActivity)
+      are auto-created on first write — no manual setup needed.
+   5. Update the <title> tag and header branding if desired.
+   6. Deploy to GitHub Pages. Done.
+   ========================================================================= */
+const CONFIG = {
+  SHEETS_API_KEY: "<redacted>",
+  BUYERS_SHEET_ID: "1W3CtABUZsQ03ixuUIJKEqmD5l8Xz05b6Le30ABCjxuU",
+  BUYERS_TAB: "Buyers"
+};
+
+/* ---------------- Firebase (same project as the acquisitions CRM) ---------------- */
+const firebaseConfig = {
+  apiKey: "<redacted>",
+  authDomain: "rgr-crm-941ab.firebaseapp.com",
+  projectId: "rgr-crm-941ab",
+  storageBucket: "rgr-crm-941ab.firebasestorage.app",
+  messagingSenderId: "970218702810",
+  appId: "1:970218702810:web:03409e8b0e971bb0b6e2e3"
+};
+firebase.initializeApp(firebaseConfig);
+const db = firebase.firestore();
+
+/* ---------------- Stages ---------------- */
+const DEAL_STAGES = [
+  { id: 'under_contract', label: 'Under Contract', color: '#8fc0e4' },
+  { id: 'marketing', label: 'Marketing', color: '#e8c476' },
+  { id: 'offers_in', label: 'Offers In', color: '#e0954a' },
+  { id: 'assigned', label: 'Assigned', color: '#4caf82' },
+  { id: 'closed', label: 'Closed', color: '#9e9e9e' },
+  { id: 'dead', label: 'Dead', color: '#e07a77' }
+];
+const STAGE_MAP = Object.fromEntries(DEAL_STAGES.map(s => [s.id, s]));
+
+/* ---------------- State ---------------- */
+let tab = 'deals';
+let stageFilter = 'all';
+let buyerSearch = '';
+let deals = [];
+let buyers = [];
+let openDealId = null;
+let openBuyerId = null;
+
+/* ---------------- Helpers ---------------- */
+const $ = id => document.getElementById(id);
+function esc(s) { return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function money(n) {
+  if (n === '' || n == null || isNaN(+n)) return '—';
+  return '$' + (+n).toLocaleString('en-US', { maximumFractionDigits: 0 });
+}
+function fmtDate(iso) {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+}
+function daysLeft(dateStr) {
+  if (!dateStr) return null;
+  const ms = new Date(dateStr) - Date.now();
+  return Math.ceil(ms / 86400000);
+}
+function showToast(msg) {
+  const t = $('toast');
+  t.textContent = msg;
+  t.style.display = 'block';
+  clearTimeout(t._h);
+  t._h = setTimeout(() => t.style.display = 'none', 2600);
+}
+function uid() { return 'id-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8); }
+function digitsOnly(p) { return String(p || '').replace(/\D/g, ''); }
+function formatPhone(p) {
+  const d = digitsOnly(p);
+  if (d.length === 10) return `(${d.slice(0,3)}) ${d.slice(3,6)}-${d.slice(6)}`;
+  if (d.length === 11 && d[0] === '1') return `(${d.slice(1,4)}) ${d.slice(4,7)}-${d.slice(7)}`;
+  return p || '';
+}
+
+/* ---------------- Firestore ---------------- */
+async function loadAll() {
+  const [dSnap, bSnap] = await Promise.all([
+    db.collection('dispoDeals').get(),
+    db.collection('dispoBuyers').get()
+  ]);
+  deals = dSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+  buyers = bSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+}
+async function logActivity(dealId, text) {
+  await db.collection('dispoActivity').add({ dealId, text, at: new Date().toISOString() });
+}
+async function getActivity(dealId) {
+  const snap = await db.collection('dispoActivity').where('dealId', '==', dealId).get();
+  return snap.docs.map(d => d.data()).sort((a, b) => (b.at || '').localeCompare(a.at || ''));
+}
+
+/* ================= Buyer Match Engine (SmartMatch-style) =================
+   Scores each buyer against a deal. Sources are pluggable — the engine only
+   cares about buyer.buyingZips[], buyer.buyingCounties[], buy box text,
+   cashBuys12mo, and lastVerified. */
+function buyerZips(b) {
+  return String(b.buyingZip || '').split(/[,;\s]+/).map(z => z.trim()).filter(Boolean);
+}
+function buyerCounties(b) {
+  return String(b.buyingCounty || '').split(/[,;]+/).map(c => c.trim().toLowerCase()).filter(Boolean);
+}
+function matchScore(deal, buyer) {
+  if (buyer.status === 'inactive') return { score: 0, why: [] };
+  let score = 0;
+  const why = [];
+  const dz = String(deal.zip || '').trim();
+  const dc = String(deal.county || '').trim().toLowerCase();
+  // ZIP match — strongest signal
+  if (dz && buyerZips(buyer).includes(dz)) { score += 40; why.push('Same ZIP'); }
+  // County match
+  if (dc && buyerCounties(buyer).includes(dc)) { score += 25; why.push('Same county'); }
+  // City match
+  const dCity = String(deal.city || '').trim().toLowerCase();
+  if (dCity && String(buyer.buyingCity || '').toLowerCase().includes(dCity)) { score += 15; why.push('Same city'); }
+  // Buy box keyword overlap (property type / deal flavor)
+  const box = String(buyer.buyBox || '').toLowerCase();
+  const dealText = `${deal.propertyType || ''} ${deal.notes || ''}`.toLowerCase();
+  const keywords = ['rental', 'flip', 'duplex', 'multi', 'land', 'rural', 'residential', 'commercial', 'fixer', 'turnkey'];
+  const hits = keywords.filter(k => box.includes(k) && (dealText.includes(k) || k === 'residential'));
+  if (hits.length) { score += Math.min(10, hits.length * 5); why.push('Buy box: ' + hits.slice(0, 2).join(', ')); }
+  // Track record — cash buys in last 12 months
+  const cb = +buyer.cashBuys12mo || 0;
+  if (cb >= 3) { score += 10; why.push(cb + ' cash buys/12mo'); }
+  else if (cb >= 1) { score += 6; why.push(cb + ' cash buy(s)/12mo'); }
+  // Recency of verification
+  if (buyer.lastVerified) {
+    const ageDays = (Date.now() - new Date(buyer.lastVerified)) / 86400000;
+    if (ageDays < 90) { score += 5; why.push('Recently verified'); }
+  }
+  return { score: Math.min(100, score), why };
+}
+function rankedBuyers(deal) {
+  return buyers
+    .map(b => ({ buyer: b, ...matchScore(deal, b) }))
+    .filter(r => r.score > 0)
+    .sort((a, b) => b.score - a.score);
+}
+
+/* ================= Deals view ================= */
+function stageBadge(stage) {
+  const s = STAGE_MAP[stage] || STAGE_MAP.under_contract;
+  return `<span class="stage-badge" style="color:${s.color};border-color:${s.color};background:${s.color}18;">${s.label}</span>`;
+}
+function renderDeals() {
+  const list = stageFilter === 'all' ? deals : deals.filter(d => d.stage === stageFilter);
+  $('deals-pill').textContent = deals.length;
+  let html = `<div class="stage-row">
+    <button class="stage-btn ${stageFilter === 'all' ? 'active' : ''}" data-stage="all">All <span class="count">${deals.length}</span></button>
+    ${DEAL_STAGES.map(s => {
+      const c = deals.filter(d => d.stage === s.id).length;
+      return `<button class="stage-btn ${stageFilter === s.id ? 'active' : ''}" data-stage="${s.id}">${s.label} <span class="count">${c}</span></button>`;
+    }).join('')}
+  </div>`;
+  if (!list.length) {
+    html += `<div class="empty-state">No deals here yet.<br><br><button class="btn-gold" onclick="showDealForm()">+ Add your first deal</button></div>`;
+  } else {
+    html += list.map(d => {
+      const dl = daysLeft(d.closeByDate);
+      const urgent = dl != null && dl <= 7 && !['closed', 'dead', 'assigned'].includes(d.stage);
+      return `<div class="deal-card" onclick="openDeal('${d.id}')">
+        <div class="deal-row">
+          <div class="deal-top">
+            <span class="deal-addr">${esc(d.address || 'Untitled deal')}</span>
+            ${stageBadge(d.stage)}
+          </div>
+          <div class="deal-sub">${esc(d.city || '')}${d.city ? ', ' : ''}${esc(d.state || 'GA')} ${esc(d.zip || '')} · ${esc(d.beds || '—')}bd/${esc(d.baths || '—')}ba · ${esc(d.sqft ? (+d.sqft).toLocaleString() + ' sqft' : '—')}</div>
+          <div class="deal-numbers">
+            <div class="deal-num"><div class="l">Contract</div><div class="v">${money(d.contractPrice)}</div></div>
+            <div class="deal-num"><div class="l">ARV</div><div class="v">${money(d.arv)}</div></div>
+            <div class="deal-num"><div class="l">Ask</div><div class="v green">${money(d.askPrice)}</div></div>
+            <div class="deal-num"><div class="l">Fee Target</div><div class="v">${money(d.assignmentFee)}</div></div>
+          </div>
+          <div class="deal-meta">
+            ${dl != null ? `<span class="${urgent ? 'urgent' : ''}">⏳ ${dl < 0 ? Math.abs(dl) + 'd past due' : dl + 'd to close-by'}</span>` : ''}
+            <span>📞 <span class="mono" data-offers="${d.id}">…</span> offers</span>
+          </div>
+        </div>
+      </div>`;
+    }).join('');
+  }
+  $('content').innerHTML = html;
+  document.querySelectorAll('[data-stage]').forEach(b => b.onclick = e => { e.stopPropagation(); stageFilter = b.dataset.stage; renderDeals(); });
+  // Fill offer counts
+  db.collection('dispoOffers').get().then(snap => {
+    const counts = {};
+    snap.docs.forEach(doc => { const o = doc.data(); counts[o.dealId] = (counts[o.dealId] || 0) + 1; });
+    document.querySelectorAll('[data-offers]').forEach(el => { el.textContent = counts[el.dataset.offers] || 0; });
+  });
+}
+
+/* ================= Buyers view ================= */
+function renderBuyers() {
+  const q = buyerSearch.toLowerCase();
+  const list = buyers.filter(b =>
+    !q || [b.name, b.buyingCity, b.buyingCounty, b.buyingZip, b.buyBox, b.phone].join(' ').toLowerCase().includes(q)
+  );
+  $('buyers-pill').textContent = buyers.length;
+  let html = `<div class="toolbar">
+    <div class="search-wrap"><span>🔍</span><input id="buyer-search" placeholder="Search buyers, city, ZIP, buy box…" value="${esc(buyerSearch)}"></div>
+    <button class="btn-ghost" onclick="importBuyers()">📥 Import from Sheet</button>
+    <button class="btn-gold" onclick="showBuyerForm()">+ Add Buyer</button>
+  </div>`;
+  if (!list.length) {
+    html += `<div class="empty-state">${buyers.length ? 'No buyers match that search.' : 'No buyers yet — import from your sheet or add one manually.'}</div>`;
+  } else {
+    html += list.map(b => `
+      <div class="buyer-card" onclick="openBuyer('${b.id}')">
+        <div class="buyer-top">
+          <span class="buyer-name">${esc(b.name)}</span>
+          <span class="buyer-type ${b.type === 'LLC' ? 'llc' : ''}">${esc(b.type || '—')}</span>
+          ${b.status === 'inactive' ? '<span class="inactive-tag">Inactive</span>' : ''}
+        </div>
+        <div class="buyer-contact">
+          ${b.phone ? `<a class="call-link" href="tel:${digitsOnly(b.phone)}" onclick="event.stopPropagation()">📞 ${esc(formatPhone(b.phone))}</a>` : '<span style="color:#5c6b82;font-size:13px;">No phone — needs skip trace</span>'}
+          ${b.email ? `<span style="font-size:13px;color:#aeb9c7;">✉️ ${esc(b.email)}</span>` : ''}
+        </div>
+        <div class="buyer-buybox">🎯 ${esc(b.buyBox || 'No buy box recorded')}</div>
+        <div class="buyer-stats">
+          ${b.cashBuys12mo ? `<span>💰 <b>${esc(b.cashBuys12mo)}</b> cash buys / 12mo</span>` : ''}
+          ${b.buyingCity || b.buyingCounty ? `<span>📍 ${esc([b.buyingCity, b.buyingCounty].filter(Boolean).join(', '))}</span>` : ''}
+          ${b.lastVerified ? `<span>✔️ Verified ${esc(fmtDate(b.lastVerified))}</span>` : ''}
+        </div>
+      </div>`).join('');
+  }
+  $('content').innerHTML = html;
+  const si = $('buyer-search');
+  if (si) si.oninput = () => { buyerSearch = si.value; const pos = si.selectionStart; renderBuyers(); const nsi = $('buyer-search'); nsi.focus(); nsi.setSelectionRange(pos, pos); };
+}
+
+/* ================= Sheet import ================= */
+async function importBuyers() {
+  showToast('Importing buyers from sheet…');
+  try {
+    const url = `https://sheets.googleapis.com/v4/spreadsheets/${CONFIG.BUYERS_SHEET_ID}/values/${encodeURIComponent(CONFIG.BUYERS_TAB)}!A1:O500?key=${CONFIG.SHEETS_API_KEY}`;
+    const res = await fetch(url);
+    const data = await res.json();
+    const rows = data.values || [];
+    if (rows.length < 2) { showToast('No buyer rows found in sheet'); return; }
+    const H = rows[0].map(h => h.trim().toLowerCase());
+    const col = name => H.indexOf(name.toLowerCase());
+    const cName = col('buyer name'), cType = col('type'), cPhone = col('phone'), cEmail = col('email'),
+          cMail = col('mailing address'), cCity = col('buying city'), cCounty = col('buying county'),
+          cZip = col('buying zip'), cBox = col('buy box'), cSrc = col('source'), cSrcD = col('source detail'),
+          cCash = col('cash buys (12 mo)'), cAdded = col('date added'), cVer = col('last verified'), cNotes = col('notes');
+    let added = 0, updated = 0;
+    const existing = {};
+    buyers.forEach(b => { existing[String(b.name || '').toLowerCase()] = b; });
+    for (let i = 1; i < rows.length; i++) {
+      const r = rows[i];
+      const name = (r[cName] || '').trim();
+      if (!name) continue;
+      const rec = {
+        name,
+        type: (r[cType] || '').trim(),
+        phone: (r[cPhone] || '').trim(),
+        email: (r[cEmail] || '').trim(),
+        mailingAddress: (r[cMail] || '').trim(),
+        buyingCity: (r[cCity] || '').trim(),
+        buyingCounty: (r[cCounty] || '').trim(),
+        buyingZip: (r[cZip] || '').trim(),
+        buyBox: (r[cBox] || '').trim(),
+        source: (r[cSrc] || '').trim(),
+        sourceDetail: (r[cSrcD] || '').trim(),
+        cashBuys12mo: (r[cCash] || '').trim(),
+        dateAdded: (r[cAdded] || '').trim(),
+        lastVerified: (r[cVer] || '').trim(),
+        notes: (r[cNotes] || '').trim(),
+        status: /inactive|not buying/i.test(r[cNotes] || '') ? 'inactive' : 'active',
+        updatedAt: new Date().toISOString()
+      };
+      const ex = existing[name.toLowerCase()];
+      if (ex) { await db.collection('dispoBuyers').doc(ex.id).set({ ...ex, ...rec }, { merge: true }); updated++; }
+      else { await db.collection('dispoBuyers').add(rec); added++; }
+    }
+    await loadAll();
+    renderBuyers();
+    showToast(`Import done: ${added} added, ${updated} updated`);
+  } catch (e) {
+    console.error(e);
+    showToast('Import failed — check connection');
+  }
+}
+
+/* ================= Tab switching + boot ================= */
+function switchTab(t) {
+  tab = t; openDealId = null; openBuyerId = null;
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === t));
+  if (t === 'deals') renderDeals(); else renderBuyers();
+}
+document.querySelectorAll('.tab-btn').forEach(b => b.onclick = () => switchTab(b.dataset.tab));
+$('add-deal-btn').onclick = () => showDealForm();
+$('import-buyers-btn').onclick = () => importBuyers();
+
+// Mobile: fade header on scroll down, return on scroll up
+(function initMobileHeaderFade() {
+  let lastY = 0, ticking = false;
+  window.addEventListener('scroll', () => {
+    if (ticking) return;
+    ticking = true;
+    requestAnimationFrame(() => {
+      ticking = false;
+      if (window.innerWidth > 640) return;
+      const header = $('site-header');
+      if (!header) return;
+      const y = window.scrollY;
+      if (y > 120 && y > lastY + 4) header.classList.add('header-hidden');
+      else if (y < lastY - 4 || y <= 120) header.classList.remove('header-hidden');
+      lastY = y;
+    });
+  }, { passive: true });
+})();
+
+(async function boot() {
+  $('content').innerHTML = '<div class="empty-state">Loading…</div>';
+  try { await loadAll(); } catch (e) { console.error(e); }
+  switchTab('deals');
+})();
+
+/* ================= Deal form (add / edit) ================= */
+function showDealForm(dealId) {
+  const d = dealId ? (deals.find(x => x.id === dealId) || {}) : {};
+  const fld = (key, label, val, type) =>
+    `<div class="form-field"><label>${label}</label><input type="${type || 'text'}" id="df-${key}" value="${esc(val == null ? '' : val)}"></div>`;
+  $('content').innerHTML = `<div class="detail-wrap">
+    <button class="back-btn" onclick="switchTab('deals')">← Back to deals</button>
+    <div class="detail-card">
+      <h2>${d.id ? 'Edit Deal' : 'New Deal'}</h2>
+      <div class="addr-sub">Manual entry — fill what you have, refine later.</div>
+      <div class="section-label">Property</div>
+      <div class="form-grid">
+        ${fld('address', 'Street address', d.address)}
+        ${fld('city', 'City', d.city)}
+        ${fld('state', 'State', d.state || 'GA')}
+        ${fld('zip', 'ZIP', d.zip)}
+        ${fld('county', 'County', d.county)}
+        ${fld('propertyType', 'Type (SFR, Duplex, Land…)', d.propertyType)}
+        ${fld('beds', 'Beds', d.beds, 'number')}
+        ${fld('baths', 'Baths', d.baths, 'number')}
+        ${fld('sqft', 'Sqft', d.sqft, 'number')}
+        ${fld('yearBuilt', 'Year built', d.yearBuilt, 'number')}
+      </div>
+      <div class="section-label">Numbers</div>
+      <div class="form-grid">
+        ${fld('contractPrice', 'Contract price $', d.contractPrice, 'number')}
+        ${fld('arv', 'ARV $', d.arv, 'number')}
+        ${fld('repairEst', 'Repair estimate $', d.repairEst, 'number')}
+        ${fld('askPrice', 'Ask price $', d.askPrice, 'number')}
+        ${fld('assignmentFee', 'Assignment fee target $', d.assignmentFee, 'number')}
+        ${fld('closeByDate', 'Close-by / contingency date', d.closeByDate, 'date')}
+      </div>
+      <div class="section-label">Seller</div>
+      <div class="form-grid">
+        ${fld('sellerName', 'Seller name', d.sellerName)}
+        ${fld('sellerPhone', 'Seller phone', d.sellerPhone, 'tel')}
+      </div>
+      <div class="section-label">Notes</div>
+      <div class="form-field"><textarea id="df-notes" placeholder="Condition, access, showing instructions…">${esc(d.notes || '')}</textarea></div>
+      <div style="margin-top:18px;display:flex;gap:10px;flex-wrap:wrap;">
+        <button class="btn-gold" onclick="saveDealForm('${d.id || ''}')">💾 Save Deal</button>
+        ${d.id ? `<button class="btn-ghost" onclick="openDeal('${d.id}')">Cancel</button>` : `<button class="btn-ghost" onclick="switchTab('deals')">Cancel</button>`}
+      </div>
+    </div>
+  </div>`;
+  window.scrollTo(0, 0);
+}
+async function saveDealForm(id) {
+  const v = k => ($('df-' + k) || {}).value?.trim() || '';
+  const num = k => { const x = v(k).replace(/[^0-9.]/g, ''); return x === '' ? '' : +x; };
+  const rec = {
+    address: v('address'), city: v('city'), state: v('state') || 'GA', zip: v('zip'), county: v('county'),
+    propertyType: v('propertyType'), beds: num('beds'), baths: num('baths'), sqft: num('sqft'), yearBuilt: num('yearBuilt'),
+    contractPrice: num('contractPrice'), arv: num('arv'), repairEst: num('repairEst'),
+    askPrice: num('askPrice'), assignmentFee: num('assignmentFee'), closeByDate: v('closeByDate'),
+    sellerName: v('sellerName'), sellerPhone: v('sellerPhone'), notes: $('df-notes').value.trim(),
+    updatedAt: new Date().toISOString()
+  };
+  if (!rec.address) { showToast('Address is required'); return; }
+  if (id) {
+    await db.collection('dispoDeals').doc(id).set(rec, { merge: true });
+    await logActivity(id, 'Deal details updated');
+    showToast('Deal saved');
+    await loadAll(); openDeal(id);
+  } else {
+    rec.stage = 'under_contract';
+    rec.createdAt = new Date().toISOString();
+    const ref = await db.collection('dispoDeals').add(rec);
+    await logActivity(ref.id, 'Deal created — under contract');
+    showToast('Deal added');
+    await loadAll(); openDeal(ref.id);
+  }
+}
+
+/* ================= Deal detail ================= */
+async function openDeal(id) {
+  openDealId = id;
+  const d = deals.find(x => x.id === id);
+  if (!d) { switchTab('deals'); return; }
+  const matches = rankedBuyers(d);
+  const offersSnap = await db.collection('dispoOffers').where('dealId', '==', id).get();
+  const offers = offersSnap.docs.map(o => ({ id: o.id, ...o.data() })).sort((a, b) => (+b.amount || 0) - (+a.amount || 0));
+  const activity = await getActivity(id);
+  const dl = daysLeft(d.closeByDate);
+  const spread = (d.arv && d.contractPrice) ? (+d.arv - +d.contractPrice) : null;
+  $('content').innerHTML = `<div class="detail-wrap">
+    <button class="back-btn" onclick="switchTab('deals')">← Back to deals</button>
+    <div class="detail-card">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap;">
+        <div>
+          <h2>${esc(d.address)}</h2>
+          <div class="addr-sub">${esc(d.city || '')}${d.city ? ', ' : ''}${esc(d.state || 'GA')} ${esc(d.zip || '')}${d.county ? ' · ' + esc(d.county) + ' Co' : ''}</div>
+        </div>
+        ${stageBadge(d.stage)}
+      </div>
+      ${dl != null && !['closed', 'dead', 'assigned'].includes(d.stage) ? `<div class="${dl <= 7 ? 'urgent' : ''}" style="font-size:14px;margin-bottom:6px;">⏳ ${dl < 0 ? Math.abs(dl) + ' days PAST the close-by date' : dl + ' days to close-by date (' + esc(fmtDate(d.closeByDate)) + ')'}</div>` : ''}
+      <div class="section-label">Numbers</div>
+      <div class="num-grid">
+        <div class="num-box"><div class="l">Contract</div><div class="v">${money(d.contractPrice)}</div></div>
+        <div class="num-box"><div class="l">ARV</div><div class="v">${money(d.arv)}</div></div>
+        <div class="num-box"><div class="l">Repairs</div><div class="v">${money(d.repairEst)}</div></div>
+        <div class="num-box"><div class="l">Ask</div><div class="v green">${money(d.askPrice)}</div></div>
+        <div class="num-box"><div class="l">Fee Target</div><div class="v">${money(d.assignmentFee)}</div></div>
+        <div class="num-box"><div class="l">ARV − Contract</div><div class="v ${spread > 0 ? 'green' : ''}">${spread != null ? money(spread) : '—'}</div></div>
+      </div>
+      <div class="section-label">Specs</div>
+      <div style="font-size:14px;color:#aeb9c7;">${esc(d.beds || '—')} bd · ${esc(d.baths || '—')} ba · ${d.sqft ? (+d.sqft).toLocaleString() + ' sqft' : '—'} · ${esc(d.propertyType || '—')}${d.yearBuilt ? ' · Built ' + esc(d.yearBuilt) : ''}</div>
+      ${d.sellerName || d.sellerPhone ? `<div class="section-label">Seller</div><div style="font-size:14px;">${esc(d.sellerName || '')} ${d.sellerPhone ? `· <a class="call-link" href="tel:${digitsOnly(d.sellerPhone)}">📞 ${esc(formatPhone(d.sellerPhone))}</a>` : ''}</div>` : ''}
+      ${d.notes ? `<div class="section-label">Notes</div><div style="font-size:14px;color:#aeb9c7;line-height:1.6;white-space:pre-wrap;">${esc(d.notes)}</div>` : ''}
+      <div style="margin-top:18px;display:flex;gap:10px;flex-wrap:wrap;">
+        <button class="btn-ghost" onclick='showDealForm(${JSON.stringify(d.id)})'>✏️ Edit</button>
+        <select id="stage-select" onchange="setStage('${d.id}', this.value)" style="padding:10px 12px;border-radius:10px;border:1px solid #22385a;background:#0b1626;color:#e9edf3;font-size:14px;">
+          ${DEAL_STAGES.map(s => `<option value="${s.id}" ${d.stage === s.id ? 'selected' : ''}>${s.label}</option>`).join('')}
+        </select>
+      </div>
+    </div>
+
+    <div class="detail-card">
+      <h2 style="font-size:18px;">🎯 Matched Buyers <span style="color:#8a97a8;font-size:13px;font-weight:400;">(${matches.length})</span></h2>
+      <div class="addr-sub">Ranked by buy-box fit — call from the top down.</div>
+      ${matches.length ? matches.slice(0, 20).map(m => `
+        <div class="match-row">
+          <div class="match-score">${m.score}</div>
+          <div class="match-info">
+            <div class="n">${esc(m.buyer.name)}</div>
+            <div class="w">${esc(m.why.join(' · '))}</div>
+          </div>
+          ${m.buyer.phone ? `<a class="call-link match-call" href="tel:${digitsOnly(m.buyer.phone)}">📞</a>` : `<span style="font-size:12px;color:#5c6b82;">no phone</span>`}
+        </div>`).join('') : '<div class="timeline-empty">No buyers match this deal yet — add buyers or import from the sheet.</div>'}
+    </div>
+
+    <div class="detail-card">
+      <h2 style="font-size:18px;">💰 Offers <span style="color:#8a97a8;font-size:13px;font-weight:400;">(${offers.length})</span></h2>
+      <div id="offers-list">${offers.length ? offers.map(o => `
+        <div class="match-row">
+          <div class="match-info">
+            <div class="n">${money(o.amount)} <span style="font-weight:400;color:#8a97a8;">— ${esc(o.buyerName || 'Unknown buyer')}</span></div>
+            <div class="w">${o.emd ? 'EMD ' + money(o.emd) + ' · ' : ''}${o.closeDate ? 'Close ' + esc(fmtDate(o.closeDate)) + ' · ' : ''}${esc(o.status || 'pending')}${o.notes ? ' · ' + esc(o.notes) : ''}</div>
+          </div>
+        </div>`).join('') : '<div class="timeline-empty">No offers yet.</div>'}</div>
+      <button class="btn-gold" style="margin-top:10px;" onclick="showOfferForm('${d.id}')">+ Log Offer</button>
+    </div>
+
+    <div class="detail-card">
+      <h2 style="font-size:18px;">📝 Activity</h2>
+      <div class="timeline" id="deal-timeline">
+        ${activity.length ? activity.map(a => `<div class="timeline-item"><span class="timeline-ts">${esc(fmtDate(a.at))}</span><br>${esc(a.text)}</div>`).join('') : '<div class="timeline-empty">No activity yet.</div>'}
+      </div>
+      <div style="display:flex;gap:8px;margin-top:12px;">
+        <input id="note-input" placeholder="Add a note…" style="flex:1;padding:11px 12px;border-radius:10px;border:1px solid #22385a;background:#0b1626;color:#e9edf3;font-size:14px;">
+        <button class="btn-ghost" onclick="addDealNote('${d.id}')">Add</button>
+      </div>
+    </div>
+  </div>`;
+  window.scrollTo(0, 0);
+}
+async function setStage(id, stage) {
+  await db.collection('dispoDeals').doc(id).set({ stage, updatedAt: new Date().toISOString() }, { merge: true });
+  await logActivity(id, `Stage → ${STAGE_MAP[stage].label}`);
+  showToast(`Stage → ${STAGE_MAP[stage].label}`);
+  await loadAll(); openDeal(id);
+}
+async function addDealNote(id) {
+  const inp = $('note-input');
+  const text = (inp.value || '').trim();
+  if (!text) return;
+  await logActivity(id, text);
+  showToast('Note added');
+  openDeal(id);
+}
+function showOfferForm(dealId) {
+  const d = deals.find(x => x.id === dealId);
+  const opts = buyers.filter(b => b.status !== 'inactive').map(b => `<option value="${esc(b.name)}">${esc(b.name)}</option>`).join('');
+  $('content').innerHTML = `<div class="detail-wrap">
+    <button class="back-btn" onclick="openDeal('${dealId}')">← Back to deal</button>
+    <div class="detail-card">
+      <h2>Log Offer — ${esc(d.address)}</h2>
+      <div class="section-label">Offer</div>
+      <div class="form-grid">
+        <div class="form-field"><label>Buyer</label><select id="of-buyer">${opts}</select></div>
+        <div class="form-field"><label>Amount $</label><input type="number" id="of-amount"></div>
+        <div class="form-field"><label>EMD $</label><input type="number" id="of-emd"></div>
+        <div class="form-field"><label>Close date</label><input type="date" id="of-close"></div>
+      </div>
+      <div class="form-field" style="margin-top:10px;"><label>Notes</label><textarea id="of-notes"></textarea></div>
+      <div style="margin-top:18px;display:flex;gap:10px;">
+        <button class="btn-gold" onclick="saveOffer('${dealId}')">💾 Save Offer</button>
+        <button class="btn-ghost" onclick="openDeal('${dealId}')">Cancel</button>
+      </div>
+    </div>
+  </div>`;
+  window.scrollTo(0, 0);
+}
+async function saveOffer(dealId) {
+  const amount = +($('of-amount').value || 0);
+  if (!amount) { showToast('Offer amount is required'); return; }
+  await db.collection('dispoOffers').add({
+    dealId,
+    buyerName: $('of-buyer').value,
+    amount,
+    emd: +($('of-emd').value || 0) || '',
+    closeDate: $('of-close').value || '',
+    notes: $('of-notes').value.trim(),
+    status: 'pending',
+    createdAt: new Date().toISOString()
+  });
+  await logActivity(dealId, `Offer logged: ${money(amount)} from ${$('of-buyer').value}`);
+  const d = deals.find(x => x.id === dealId);
+  if (d && d.stage === 'marketing') {
+    await db.collection('dispoDeals').doc(dealId).set({ stage: 'offers_in' }, { merge: true });
+    await logActivity(dealId, 'Stage → Offers In');
+  }
+  showToast('Offer logged');
+  await loadAll(); openDeal(dealId);
+}
+
+/* ================= Buyer form + detail ================= */
+function showBuyerForm(buyerId) {
+  const b = buyerId ? (buyers.find(x => x.id === buyerId) || {}) : {};
+  const fld = (key, label, val, type) =>
+    `<div class="form-field"><label>${label}</label><input type="${type || 'text'}" id="bf-${key}" value="${esc(val == null ? '' : val)}"></div>`;
+  $('content').innerHTML = `<div class="detail-wrap">
+    <button class="back-btn" onclick="switchTab('buyers')">← Back to buyers</button>
+    <div class="detail-card">
+      <h2>${b.id ? 'Edit Buyer' : 'New Buyer'}</h2>
+      <div class="addr-sub">Pushed by DISPO MANAGER after skip tracing, or added manually.</div>
+      <div class="section-label">Contact</div>
+      <div class="form-grid">
+        ${fld('name', 'Buyer name', b.name)}
+        ${fld('type', 'Type (LLC / Individual)', b.type)}
+        ${fld('phone', 'Phone', b.phone, 'tel')}
+        ${fld('email', 'Email', b.email, 'email')}
+        ${fld('mailingAddress', 'Mailing address', b.mailingAddress)}
+      </div>
+      <div class="section-label">Buy Box</div>
+      <div class="form-grid">
+        ${fld('buyingCity', 'Buying city', b.buyingCity)}
+        ${fld('buyingCounty', 'Buying county', b.buyingCounty)}
+        ${fld('buyingZip', 'Buying ZIP(s)', b.buyingZip)}
+        ${fld('cashBuys12mo', 'Cash buys / 12mo', b.cashBuys12mo, 'number')}
+      </div>
+      <div class="form-field" style="margin-top:10px;"><label>Buy box description</label><textarea id="bf-buyBox" placeholder="e.g. Older in-town residential, rural parcels…">${esc(b.buyBox || '')}</textarea></div>
+      <div class="form-grid" style="margin-top:10px;">
+        ${fld('source', 'Source', b.source)}
+        ${fld('sourceDetail', 'Source detail', b.sourceDetail)}
+        ${fld('lastVerified', 'Last verified', b.lastVerified, 'date')}
+        <div class="form-field"><label>Status</label><select id="bf-status">
+          <option value="active" ${(b.status || 'active') === 'active' ? 'selected' : ''}>Active</option>
+          <option value="inactive" ${b.status === 'inactive' ? 'selected' : ''}>Inactive</option>
+        </select></div>
+      </div>
+      <div class="form-field" style="margin-top:10px;"><label>Notes</label><textarea id="bf-notes">${esc(b.notes || '')}</textarea></div>
+      <div style="margin-top:18px;display:flex;gap:10px;flex-wrap:wrap;">
+        <button class="btn-gold" onclick="saveBuyerForm('${b.id || ''}')">💾 Save Buyer</button>
+        ${b.id ? `<button class="btn-ghost" onclick="openBuyer('${b.id}')">Cancel</button>` : `<button class="btn-ghost" onclick="switchTab('buyers')">Cancel</button>`}
+      </div>
+    </div>
+  </div>`;
+  window.scrollTo(0, 0);
+}
+async function saveBuyerForm(id) {
+  const v = k => ($('bf-' + k) || {}).value?.trim() || '';
+  const rec = {
+    name: v('name'), type: v('type'), phone: v('phone'), email: v('email'), mailingAddress: v('mailingAddress'),
+    buyingCity: v('buyingCity'), buyingCounty: v('buyingCounty'), buyingZip: v('buyingZip'),
+    cashBuys12mo: v('cashBuys12mo'), buyBox: $('bf-buyBox').value.trim(),
+    source: v('source'), sourceDetail: v('sourceDetail'), lastVerified: v('lastVerified'),
+    status: $('bf-status').value, notes: $('bf-notes').value.trim(),
+    updatedAt: new Date().toISOString()
+  };
+  if (!rec.name) { showToast('Buyer name is required'); return; }
+  if (id) {
+    await db.collection('dispoBuyers').doc(id).set(rec, { merge: true });
+    showToast('Buyer saved');
+    await loadAll(); openBuyer(id);
+  } else {
+    rec.dateAdded = new Date().toISOString().slice(0, 10);
+    await db.collection('dispoBuyers').add(rec);
+    showToast('Buyer added');
+    await loadAll(); switchTab('buyers');
+  }
+}
+function openBuyer(id) {
+  openBuyerId = id;
+  const b = buyers.find(x => x.id === id);
+  if (!b) { switchTab('buyers'); return; }
+  // Deals this buyer matches
+  const matched = deals
+    .map(d => ({ deal: d, ...matchScore(d, b) }))
+    .filter(r => r.score > 0)
+    .sort((a, c) => c.score - a.score);
+  $('content').innerHTML = `<div class="detail-wrap">
+    <button class="back-btn" onclick="switchTab('buyers')">← Back to buyers</button>
+    <div class="detail-card">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap;">
+        <div>
+          <h2>${esc(b.name)}</h2>
+          <div class="addr-sub">${esc(b.type || '')}${b.mailingAddress ? ' · ' + esc(b.mailingAddress) : ''}</div>
+        </div>
+        ${b.status === 'inactive' ? '<span class="inactive-tag">Inactive</span>' : ''}
+      </div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin:6px 0 4px;">
+        ${b.phone ? `<a class="btn-gold" href="tel:${digitsOnly(b.phone)}" style="text-decoration:none;">📞 ${esc(formatPhone(b.phone))}</a>` : '<span style="color:#e07a77;font-size:14px;font-weight:700;">⚠️ No phone — needs skip trace (DISPO MANAGER)</span>'}
+        ${b.email ? `<a class="btn-ghost" href="mailto:${esc(b.email)}" style="text-decoration:none;">✉️ Email</a>` : ''}
+      </div>
+      <div class="section-label">Buy Box</div>
+      <div style="font-size:14px;color:#aeb9c7;font-style:italic;">🎯 ${esc(b.buyBox || 'Not recorded')}</div>
+      <div class="num-grid" style="margin-top:14px;">
+        <div class="num-box"><div class="l">Cash buys / 12mo</div><div class="v">${esc(b.cashBuys12mo || '—')}</div></div>
+        <div class="num-box"><div class="l">Territory</div><div class="v" style="font-size:14px;">${esc([b.buyingCity, b.buyingCounty, b.buyingZip].filter(Boolean).join(' · ') || '—')}</div></div>
+      </div>
+      <div class="section-label">Provenance</div>
+      <div style="font-size:13px;color:#8a97a8;line-height:1.7;">
+        Source: ${esc(b.source || '—')}${b.sourceDetail ? '<br>' + esc(b.sourceDetail) : ''}<br>
+        Added: ${esc(fmtDate(b.dateAdded))} · Verified: ${esc(fmtDate(b.lastVerified))}
+      </div>
+      ${b.notes ? `<div class="section-label">Notes</div><div style="font-size:14px;color:#aeb9c7;line-height:1.6;white-space:pre-wrap;">${esc(b.notes)}</div>` : ''}
+      <div style="margin-top:18px;"><button class="btn-ghost" onclick='showBuyerForm(${JSON.stringify(b.id)})'>✏️ Edit Buyer</button></div>
+    </div>
+    <div class="detail-card">
+      <h2 style="font-size:18px;">📦 Matching Deals <span style="color:#8a97a8;font-size:13px;font-weight:400;">(${matched.length})</span></h2>
+      ${matched.length ? matched.map(m => `
+        <div class="match-row" onclick="openDeal('${m.deal.id}')" style="cursor:pointer;">
+          <div class="match-score">${m.score}</div>
+          <div class="match-info">
+            <div class="n">${esc(m.deal.address)}</div>
+            <div class="w">${esc(m.why.join(' · '))}</div>
+          </div>
+        </div>`).join('') : '<div class="timeline-empty">No current deals match this buyer.</div>'}
+    </div>
+  </div>`;
+  window.scrollTo(0, 0);
+}
+</script>
+</body>
+</html>
