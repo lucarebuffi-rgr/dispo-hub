@@ -182,6 +182,7 @@
     <div class="tabs" style="border-bottom:none; margin: 10px 0 0;">
       <button class="tab-btn active" data-tab="deals">📦 Deals <span class="pill" id="deals-pill">0</span></button>
       <button class="tab-btn" data-tab="buyers">🤝 Buyers <span class="pill" id="buyers-pill">0</span></button>
+      <button class="tab-btn" data-tab="kpis">📊 KPIs</button>
     </div>
   </div>
 </div>
@@ -484,7 +485,7 @@ async function importBuyers() {
 function switchTab(t) {
   tab = t; openDealId = null; openBuyerId = null;
   document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === t));
-  if (t === 'deals') renderDeals(); else renderBuyers();
+  if (t === 'deals') renderDeals(); else if (t === 'buyers') renderBuyers(); else renderKPIs();
 }
 document.querySelectorAll('.tab-btn').forEach(b => b.onclick = () => switchTab(b.dataset.tab));
 $('add-deal-btn').onclick = () => showDealForm();
@@ -510,6 +511,9 @@ $('import-buyers-btn').onclick = () => importBuyers();
 })();
 
 (async function boot() {
+  // Public landing page mode
+  const pubDeal = new URLSearchParams(location.search).get('deal');
+  if (pubDeal) { renderPublicDeal(pubDeal); return; }
   $('content').innerHTML = '<div class="empty-state">Loading…</div>';
   try { await loadAll(); } catch (e) { console.error(e); }
   switchTab('deals');
@@ -590,6 +594,15 @@ async function saveDealForm(id) {
 }
 
 /* ================= Deal detail ================= */
+function shareDeal(id) {
+  const url = publicDealURL(id);
+  const done = () => showToast('Deal page link copied — send it to buyers');
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(url).then(done).catch(() => prompt('Copy this link:', url));
+  } else {
+    prompt('Copy this link:', url);
+  }
+}
 async function openDeal(id) {
   openDealId = id;
   const d = deals.find(x => x.id === id);
@@ -598,6 +611,10 @@ async function openDeal(id) {
   const offersSnap = await db.collection('dispoOffers').where('dealId', '==', id).get();
   const offers = offersSnap.docs.map(o => ({ id: o.id, ...o.data() })).sort((a, b) => (+b.amount || 0) - (+a.amount || 0));
   const activity = await getActivity(id);
+  const compsSnap = await db.collection('dispoComps').where('dealId', '==', id).get();
+  const allComps = compsSnap.docs.map(c => ({ id: c.id, ...c.data() })).sort((a, b) => (+b.soldPrice || 0) - (+a.soldPrice || 0));
+  const invComps = allComps.filter(c => c.compType !== 'retail');
+  const retComps = allComps.filter(c => c.compType === 'retail');
   const dl = daysLeft(d.closeByDate);
   const spread = (d.arv && d.contractPrice) ? (+d.arv - +d.contractPrice) : null;
   $('content').innerHTML = `<div class="detail-wrap">
@@ -625,6 +642,7 @@ async function openDeal(id) {
       ${d.sellerName || d.sellerPhone ? `<div class="section-label">Seller</div><div style="font-size:14px;">${esc(d.sellerName || '')} ${d.sellerPhone ? `· <a class="call-link" href="tel:${digitsOnly(d.sellerPhone)}">📞 ${esc(formatPhone(d.sellerPhone))}</a>` : ''}</div>` : ''}
       ${d.notes ? `<div class="section-label">Notes</div><div style="font-size:14px;color:#aeb9c7;line-height:1.6;white-space:pre-wrap;">${esc(d.notes)}</div>` : ''}
       <div style="margin-top:18px;display:flex;gap:10px;flex-wrap:wrap;">
+        <button class="btn-gold" onclick="shareDeal('${d.id}')">🔗 Share Deal Page</button>
         <button class="btn-ghost" onclick='showDealForm(${JSON.stringify(d.id)})'>✏️ Edit</button>
         <select id="stage-select" onchange="setStage('${d.id}', this.value)" style="padding:10px 12px;border-radius:10px;border:1px solid #22385a;background:#0b1626;color:#e9edf3;font-size:14px;">
           ${DEAL_STAGES.map(s => `<option value="${s.id}" ${d.stage === s.id ? 'selected' : ''}>${s.label}</option>`).join('')}
@@ -633,8 +651,20 @@ async function openDeal(id) {
     </div>
 
     <div class="detail-card">
+      <h2 style="font-size:18px;">📊 Comps & MAO</h2>
+      <div class="addr-sub">Investor comps = what investors paid nearby · Retail comps = ARV support</div>
+      <div id="mao-box">${maoHTML(d)}</div>
+      <div class="section-label">Investor Comps (${invComps.length})</div>
+      <div id="inv-comps">${compRowsHTML(invComps, id)}</div>
+      <div class="section-label">Retail Comps (${retComps.length})</div>
+      <div id="ret-comps">${compRowsHTML(retComps, id)}</div>
+      <button class="btn-ghost" style="margin-top:10px;" onclick="showCompForm('${id}')">+ Add Comp</button>
+    </div>
+
+    <div class="detail-card">
       <h2 style="font-size:18px;">🎯 Matched Buyers <span style="color:#8a97a8;font-size:13px;font-weight:400;">(${matches.length})</span></h2>
       <div class="addr-sub">Ranked by buy-box fit — call from the top down.</div>
+      ${matches.length ? `<button class="btn-gold" style="width:100%;min-height:52px;margin-bottom:12px;" onclick="startDialer('${id}')">📞 Start Call Session (${matches.length} buyers)</button>` : ''}
       ${matches.length ? matches.slice(0, 20).map(m => `
         <div class="match-row">
           <div class="match-score">${m.score}</div>
@@ -729,6 +759,361 @@ async function saveOffer(dealId) {
   }
   showToast('Offer logged');
   await loadAll(); openDeal(dealId);
+}
+
+/* ================= Comps + MAO ================= */
+function maoHTML(d) {
+  const pct = +(d.maoPct || 70);
+  const arv = +d.arv || 0, repairs = +d.repairEst || 0, fee = +d.assignmentFee || 0;
+  const mao = arv ? Math.round(arv * pct / 100 - repairs - fee) : null;
+  const contract = +d.contractPrice || 0;
+  const verdict = (mao != null && contract) ? (contract <= mao ? 'good' : 'bad') : null;
+  return `<div style="background:rgba(0,0,0,.25);border:1px solid #22385a;border-radius:12px;padding:14px;margin-bottom:6px;">
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+      <div class="form-field" style="max-width:130px;"><label>MAO % of ARV</label>
+        <input type="number" id="mao-pct" value="${pct}" min="10" max="100" onchange="updateMaoPct('${d.id}', this.value)" style="width:100%;padding:9px 10px;border-radius:10px;border:1px solid #22385a;background:#0b1626;color:#e8c476;font-size:15px;font-weight:700;">
+      </div>
+      <div>
+        <div style="font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:#8a97a8;">Max Allowable Offer</div>
+        <div style="font-size:24px;font-weight:800;color:#e8c476;font-family:'JetBrains Mono',monospace;">${mao != null ? money(mao) : '—'}</div>
+      </div>
+      ${verdict ? `<div style="font-size:13px;font-weight:700;color:${verdict === 'good' ? '#4caf82' : '#e07a77'};">${verdict === 'good' ? '✓ Contract at/below MAO' : '⚠ Contract above MAO by ' + money(contract - mao)}</div>` : ''}
+    </div>
+    <div style="font-size:12px;color:#8a97a8;margin-top:8px;">${pct}% × ${money(arv)} − ${money(repairs)} repairs − ${money(fee)} fee</div>
+  </div>`;
+}
+async function updateMaoPct(dealId, pct) {
+  await db.collection('dispoDeals').doc(dealId).set({ maoPct: +pct || 70 }, { merge: true });
+  const d = deals.find(x => x.id === dealId);
+  if (d) d.maoPct = +pct || 70;
+  const box = document.getElementById('mao-box');
+  if (box && d) box.innerHTML = maoHTML(d);
+}
+function compRowsHTML(comps, dealId) {
+  if (!comps.length) return '<div class="timeline-empty">No comps yet.</div>';
+  return comps.map(c => `
+    <div class="match-row">
+      <div class="match-info">
+        <div class="n">${money(c.soldPrice)} <span style="font-weight:400;color:#8a97a8;">— ${esc(c.address || '')}</span></div>
+        <div class="w">${c.soldDate ? esc(fmtDate(c.soldDate)) + ' · ' : ''}${c.sqft ? (+c.sqft).toLocaleString() + ' sqft · ' : ''}${c.beds ? esc(c.beds) + 'bd/' + esc(c.baths || '—') + 'ba · ' : ''}${c.distance ? esc(c.distance) + ' · ' : ''}${esc(c.notes || '')}</div>
+      </div>
+      <button class="btn-ghost" style="padding:6px 10px;min-height:0;" onclick="event.stopPropagation();deleteComp('${dealId}','${c.id}')">✕</button>
+    </div>`).join('');
+}
+function showCompForm(dealId) {
+  const d = deals.find(x => x.id === dealId);
+  $('content').innerHTML = `<div class="detail-wrap">
+    <button class="back-btn" onclick="openDeal('${dealId}')">← Back to deal</button>
+    <div class="detail-card">
+      <h2>Add Comp — ${esc(d.address)}</h2>
+      <div class="form-grid" style="margin-top:12px;">
+        <div class="form-field"><label>Type</label><select id="cp-type">
+          <option value="investor">Investor comp</option><option value="retail">Retail comp</option>
+        </select></div>
+        <div class="form-field"><label>Sold price $</label><input type="number" id="cp-price"></div>
+        <div class="form-field"><label>Address</label><input id="cp-addr"></div>
+        <div class="form-field"><label>Sold date</label><input type="date" id="cp-date"></div>
+        <div class="form-field"><label>Sqft</label><input type="number" id="cp-sqft"></div>
+        <div class="form-field"><label>Distance</label><input id="cp-dist" placeholder="e.g. 0.4 mi"></div>
+        <div class="form-field"><label>Beds</label><input type="number" id="cp-beds"></div>
+        <div class="form-field"><label>Baths</label><input type="number" id="cp-baths"></div>
+      </div>
+      <div class="form-field" style="margin-top:10px;"><label>Notes</label><textarea id="cp-notes" placeholder="Condition, flip vs rental…"></textarea></div>
+      <div style="margin-top:18px;display:flex;gap:10px;">
+        <button class="btn-gold" onclick="saveComp('${dealId}')">💾 Save Comp</button>
+        <button class="btn-ghost" onclick="openDeal('${dealId}')">Cancel</button>
+      </div>
+    </div>
+  </div>`;
+  window.scrollTo(0, 0);
+}
+async function saveComp(dealId) {
+  const price = +($('cp-price').value || 0);
+  if (!price) { showToast('Sold price is required'); return; }
+  await db.collection('dispoComps').add({
+    dealId,
+    compType: $('cp-type').value,
+    soldPrice: price,
+    address: $('cp-addr').value.trim(),
+    soldDate: $('cp-date').value || '',
+    sqft: +($('cp-sqft').value || 0) || '',
+    distance: $('cp-dist').value.trim(),
+    beds: $('cp-beds').value.trim(),
+    baths: $('cp-baths').value.trim(),
+    notes: $('cp-notes').value.trim(),
+    createdAt: new Date().toISOString()
+  });
+  await logActivity(dealId, `Comp added: ${money(price)} (${$('cp-type').value})`);
+  showToast('Comp saved');
+  openDeal(dealId);
+}
+async function deleteComp(dealId, compId) {
+  if (!confirm('Delete this comp?')) return;
+  await db.collection('dispoComps').doc(compId).delete();
+  showToast('Comp deleted');
+  openDeal(dealId);
+}
+
+/* ================= Public landing page (?deal=ID) ================= */
+function publicDealURL(id) {
+  return location.origin + location.pathname + '?deal=' + id;
+}
+async function renderPublicDeal(id) {
+  document.title = 'Deal — Dispo Hub';
+  try {
+    const doc = await db.collection('dispoDeals').doc(id).get();
+    if (!doc.exists) {
+      document.body.innerHTML = '<div class="empty-state" style="padding-top:80px;">This deal is no longer available.</div>';
+      return;
+    }
+    const d = { id: doc.id, ...doc.data() };
+    if (['dead'].includes(d.stage)) {
+      document.body.innerHTML = '<div class="empty-state" style="padding-top:80px;">This deal is no longer available.</div>';
+      return;
+    }
+    document.body.innerHTML = `
+    <div style="max-width:640px;margin:0 auto;padding:0 0 60px;">
+      <div style="text-align:center;padding:26px 20px 6px;">
+        <div style="font-size:11px;letter-spacing:.22em;color:#d4a843;font-weight:700;">DISPO HUB</div>
+        <div style="font-family:'Cinzel',serif;font-size:15px;color:#8a97a8;margin-top:4px;">Off-Market Investment Opportunity</div>
+      </div>
+      <div style="margin:18px 16px 0;background:linear-gradient(135deg,#1e3a5f,#16294a);border:1px solid #2a4a73;border-radius:18px;overflow:hidden;">
+        <div style="background:linear-gradient(135deg,rgba(212,168,67,.25),rgba(212,168,67,.05));padding:26px 22px;">
+          <div style="font-size:24px;font-weight:800;">${esc(d.address)}</div>
+          <div style="color:#aeb9c7;font-size:15px;margin-top:4px;">${esc(d.city || '')}${d.city ? ', ' : ''}${esc(d.state || 'GA')} ${esc(d.zip || '')}</div>
+          <div style="display:flex;gap:16px;margin-top:14px;flex-wrap:wrap;">
+            <div><div style="font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:#8a97a8;">Asking</div>
+            <div style="font-size:30px;font-weight:800;color:#4caf82;font-family:'JetBrains Mono',monospace;">${money(d.askPrice)}</div></div>
+            <div><div style="font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:#8a97a8;">ARV</div>
+            <div style="font-size:20px;font-weight:800;color:#e8c476;font-family:'JetBrains Mono',monospace;">${money(d.arv)}</div></div>
+          </div>
+        </div>
+        <div style="padding:20px 22px;">
+          <div style="display:flex;gap:18px;flex-wrap:wrap;font-size:14px;color:#aeb9c7;">
+            <span>🛏️ ${esc(d.beds || '—')} bd</span><span>🛁 ${esc(d.baths || '—')} ba</span>
+            <span>📐 ${d.sqft ? (+d.sqft).toLocaleString() + ' sqft' : '—'}</span>
+            ${d.yearBuilt ? `<span>🏠 Built ${esc(d.yearBuilt)}</span>` : ''}
+            ${d.propertyType ? `<span>🏷️ ${esc(d.propertyType)}</span>` : ''}
+          </div>
+          ${d.repairEst ? `<div style="margin-top:12px;font-size:14px;color:#aeb9c7;">🔧 Est. repairs: <b style="color:#e8c476;">${money(d.repairEst)}</b></div>` : ''}
+          ${d.notes ? `<div style="margin-top:14px;font-size:14px;color:#aeb9c7;line-height:1.7;white-space:pre-wrap;">${esc(d.notes)}</div>` : ''}
+        </div>
+      </div>
+      <div style="margin:18px 16px 0;background:linear-gradient(180deg,#1e3a5f,#182c49);border:1px solid #d4a843;border-radius:18px;padding:22px;">
+        <div style="font-size:18px;font-weight:800;color:#e8c476;margin-bottom:4px;">💰 Make an Offer</div>
+        <div style="font-size:13px;color:#8a97a8;margin-bottom:14px;">Serious cash buyers only. We'll be in touch shortly.</div>
+        <div id="pub-offer-form">
+          <div class="form-field" style="margin-bottom:10px;"><label>Your name *</label><input id="po-name" style="width:100%;padding:13px 12px;border-radius:10px;border:1px solid #22385a;background:#0b1626;color:#e9edf3;font-size:16px;"></div>
+          <div class="form-field" style="margin-bottom:10px;"><label>Phone *</label><input id="po-phone" type="tel" style="width:100%;padding:13px 12px;border-radius:10px;border:1px solid #22385a;background:#0b1626;color:#e9edf3;font-size:16px;"></div>
+          <div class="form-field" style="margin-bottom:10px;"><label>Email</label><input id="po-email" type="email" style="width:100%;padding:13px 12px;border-radius:10px;border:1px solid #22385a;background:#0b1626;color:#e9edf3;font-size:16px;"></div>
+          <div class="form-field" style="margin-bottom:10px;"><label>Offer amount $ *</label><input id="po-amount" type="number" style="width:100%;padding:13px 12px;border-radius:10px;border:1px solid #22385a;background:#0b1626;color:#e9edf3;font-size:16px;"></div>
+          <div class="form-field" style="margin-bottom:14px;"><label>Message</label><textarea id="po-msg" style="width:100%;padding:13px 12px;border-radius:10px;border:1px solid #22385a;background:#0b1626;color:#e9edf3;font-size:16px;min-height:70px;" placeholder="Proof of funds, close timeline…"></textarea></div>
+          <button class="btn-gold" style="width:100%;min-height:52px;font-size:16px;" onclick="submitPublicOffer('${d.id}')">Submit Offer</button>
+        </div>
+        <div id="pub-offer-done" style="display:none;text-align:center;padding:20px 0;">
+          <div style="font-size:44px;">✅</div>
+          <div style="font-size:18px;font-weight:800;color:#4caf82;margin-top:8px;">Offer received!</div>
+          <div style="font-size:14px;color:#8a97a8;margin-top:6px;">We'll review it and reach out shortly.</div>
+        </div>
+      </div>
+      <div style="text-align:center;color:#5c6b82;font-size:12px;margin-top:22px;">Powered by Dispo Hub</div>
+    </div>`;
+    window.scrollTo(0, 0);
+  } catch (e) {
+    console.error(e);
+    document.body.innerHTML = '<div class="empty-state" style="padding-top:80px;">Could not load this deal.</div>';
+  }
+}
+async function submitPublicOffer(dealId) {
+  const name = ($('po-name').value || '').trim();
+  const phone = ($('po-phone').value || '').trim();
+  const amount = +($('po-amount').value || 0);
+  if (!name || !phone || !amount) { showToast('Name, phone, and offer amount are required'); return; }
+  try {
+    await db.collection('dispoOffers').add({
+      dealId,
+      buyerName: name + ' (web)',
+      buyerPhone: phone,
+      buyerEmail: ($('po-email').value || '').trim(),
+      amount,
+      notes: ($('po-msg').value || '').trim(),
+      status: 'pending',
+      source: 'landing_page',
+      createdAt: new Date().toISOString()
+    });
+    await logActivity(dealId, `🌐 Web offer: ${money(amount)} from ${name}`);
+    $('pub-offer-form').style.display = 'none';
+    $('pub-offer-done').style.display = 'block';
+    window.scrollTo(0, document.body.scrollHeight);
+  } catch (e) {
+    console.error(e);
+    showToast('Could not submit — please call instead');
+  }
+}
+
+/* ================= KPI dashboard ================= */
+async function renderKPIs() {
+  $('content').innerHTML = '<div class="empty-state">Loading KPIs…</div>';
+  const offersSnap = await db.collection('dispoOffers').get();
+  const offers = offersSnap.docs.map(o => o.data());
+  const active = deals.filter(d => !['closed', 'dead'].includes(d.stage));
+  const closedDeals = deals.filter(d => d.stage === 'closed');
+  const assignedDeals = deals.filter(d => d.stage === 'assigned');
+  const totalFees = closedDeals.reduce((s, d) => s + (+d.assignmentFee || 0), 0);
+  // Avg days under contract → assigned/closed
+  let daySum = 0, dayN = 0;
+  deals.forEach(d => {
+    if (['assigned', 'closed'].includes(d.stage) && d.createdAt && d.updatedAt) {
+      const days = (new Date(d.updatedAt) - new Date(d.createdAt)) / 86400000;
+      if (days >= 0 && days < 365) { daySum += days; dayN++; }
+    }
+  });
+  const stat = (label, val, sub) => `
+    <div class="num-box" style="padding:16px;">
+      <div class="l">${label}</div>
+      <div class="v" style="font-size:26px;">${val}</div>
+      ${sub ? `<div style="font-size:12px;color:#8a97a8;margin-top:4px;">${sub}</div>` : ''}
+    </div>`;
+  $('content').innerHTML = `
+    <div class="num-grid" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr));">
+      ${stat('Active deals', active.length, 'under contract → offers in')}
+      ${stat('Total offers', offers.length, 'across all deals')}
+      ${stat('Assigned', assignedDeals.length, '')}
+      ${stat('Closed', closedDeals.length, '')}
+      ${stat('Fees collected', money(totalFees), 'closed deals')}
+      ${stat('Avg days to assign', dayN ? Math.round(daySum / dayN) : '—', dayN ? `over ${dayN} deals` : '')}
+    </div>
+    <div class="section-label">Deals by stage</div>
+    ${DEAL_STAGES.map(s => {
+      const c = deals.filter(d => d.stage === s.id).length;
+      const pct = deals.length ? Math.round(c / deals.length * 100) : 0;
+      return `<div style="margin-bottom:10px;">
+        <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:4px;">
+          <span style="color:${s.color};font-weight:700;">${s.label}</span><span class="mono">${c}</span>
+        </div>
+        <div style="height:8px;background:#16294a;border-radius:4px;overflow:hidden;">
+          <div style="height:100%;width:${pct}%;background:${s.color};border-radius:4px;"></div>
+        </div>
+      </div>`;
+    }).join('')}
+    <div class="section-label">Recent offers</div>
+    ${offers.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')).slice(0, 10).map(o => {
+      const d = deals.find(x => x.id === o.dealId);
+      return `<div class="match-row"><div class="match-info">
+        <div class="n">${money(o.amount)} <span style="font-weight:400;color:#8a97a8;">— ${esc(o.buyerName || '')}</span></div>
+        <div class="w">${esc(d ? d.address : '')} · ${esc(fmtDate((o.createdAt || '').slice(0, 10)))}</div>
+      </div></div>`;
+    }).join('') || '<div class="timeline-empty">No offers yet.</div>'}`;
+}
+
+/* ================= Dispo dialer ================= */
+let dialer = null; // {dealId, queue:[{buyer,score,why}], idx, outcomes:{}}
+function startDialer(dealId) {
+  const d = deals.find(x => x.id === dealId);
+  if (!d) return;
+  const queue = rankedBuyers(d);
+  if (!queue.length) { showToast('No matched buyers to call'); return; }
+  dialer = { dealId, queue, idx: 0, outcomes: {} };
+  renderDialer();
+}
+function renderDialer() {
+  const d = deals.find(x => x.id === dialer.dealId);
+  const item = dialer.queue[dialer.idx];
+  const b = item.buyer;
+  const prev = dialer.outcomes[b.id];
+  const outs = ['Interested', 'Made Offer', 'Follow-up', 'No Answer', 'Not Interested', 'Bad Number'];
+  document.body.insertAdjacentHTML('beforeend', `
+  <div id="dispo-dialer" style="position:fixed;inset:0;z-index:2000;background:#0a1423;display:flex;flex-direction:column;">
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 16px;border-bottom:1px solid #16283f;">
+      <div>
+        <div style="font-size:11px;letter-spacing:.14em;color:#d4a843;font-weight:700;">DISPO CALL SESSION</div>
+        <div style="font-size:14px;font-weight:700;margin-top:2px;">${esc(d.address)}</div>
+      </div>
+      <button class="btn-ghost" onclick="closeDialer()">✕ End</button>
+    </div>
+    <div style="text-align:center;padding:10px;font-size:13px;color:#8a97a8;">Buyer ${dialer.idx + 1} of ${dialer.queue.length} · Match score <b style="color:#e8c476;">${item.score}</b></div>
+    <div style="flex:1;overflow-y:auto;padding:6px 16px 20px;max-width:560px;width:100%;margin:0 auto;">
+      <div class="detail-card" style="text-align:center;">
+        <div style="font-size:22px;font-weight:800;">${esc(b.name)}</div>
+        <div style="font-size:13px;color:#8a97a8;margin-top:4px;">${esc(item.why.join(' · '))}</div>
+        ${b.buyBox ? `<div style="font-size:13px;color:#aeb9c7;font-style:italic;margin-top:8px;">🎯 ${esc(b.buyBox)}</div>` : ''}
+        ${b.phone
+          ? `<a href="tel:${digitsOnly(b.phone)}" class="btn-gold" style="display:block;text-decoration:none;margin:18px 0 6px;min-height:60px;display:flex;align-items:center;justify-content:center;font-size:19px;">📞 ${esc(formatPhone(b.phone))}</a>`
+          : '<div style="color:#e07a77;font-weight:700;margin:18px 0;">⚠️ No phone — needs skip trace</div>'}
+        ${b.email ? `<div style="font-size:14px;color:#aeb9c7;">✉️ ${esc(b.email)}</div>` : ''}
+      </div>
+      <div class="detail-card">
+        <div class="section-label" style="margin-top:0;">Log outcome</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+          ${outs.map(o => `<button class="btn-ghost" data-outcome="${o}" style="${prev && prev.outcome === o ? 'border-color:#d4a843;color:#e8c476;background:rgba(212,168,67,.1);' : ''}">${o}</button>`).join('')}
+        </div>
+        <div class="form-field" style="margin-top:10px;"><textarea id="dialer-note" placeholder="Call notes…" style="width:100%;padding:12px;border-radius:10px;border:1px solid #22385a;background:#0b1626;color:#e9edf3;font-size:15px;min-height:64px;">${esc((prev && prev.note) || '')}</textarea></div>
+      </div>
+    </div>
+    <div style="display:flex;border-top:1px solid #16283f;background:#0d1b2e;padding:10px 12px calc(10px + env(safe-area-inset-bottom));gap:10px;max-width:560px;width:100%;margin:0 auto;">
+      <button class="btn-ghost" style="flex:1;min-height:52px;" ${dialer.idx === 0 ? 'disabled style="flex:1;min-height:52px;opacity:.4;"' : ''} onclick="dialerNav(-1)">‹ Prev</button>
+      <button class="btn-gold" style="flex:2;min-height:52px;" onclick="dialerNext()">Save & Next ›</button>
+    </div>
+  </div>`);
+  document.querySelectorAll('#dispo-dialer [data-outcome]').forEach(btn => {
+    btn.onclick = () => {
+      document.querySelectorAll('#dispo-dialer [data-outcome]').forEach(x => { x.style.borderColor = ''; x.style.color = ''; x.style.background = ''; });
+      btn.style.borderColor = '#d4a843'; btn.style.color = '#e8c476'; btn.style.background = 'rgba(212,168,67,.1)';
+      btn.dataset.selected = '1';
+      document.querySelectorAll('#dispo-dialer [data-outcome]').forEach(x => { if (x !== btn) delete x.dataset.selected; });
+    };
+    if (prev && prev.outcome === btn.dataset.outcome) btn.dataset.selected = '1';
+  });
+}
+function dialerCurrentOutcome() {
+  const sel = document.querySelector('#dispo-dialer [data-outcome][data-selected]');
+  const note = ($('dialer-note') || {}).value?.trim() || '';
+  return { outcome: sel ? sel.dataset.outcome : '', note };
+}
+async function persistDialerOutcome() {
+  const item = dialer.queue[dialer.idx];
+  const { outcome, note } = dialerCurrentOutcome();
+  if (!outcome && !note) return;
+  dialer.outcomes[item.buyer.id] = { outcome, note };
+  const d = deals.find(x => x.id === dialer.dealId);
+  const txt = `📞 ${item.buyer.name}: ${outcome || 'note'}${note ? ' — ' + note : ''}`;
+  await logActivity(dialer.dealId, txt);
+  await db.collection('dispoBuyers').doc(item.buyer.id).set({
+    lastContact: new Date().toISOString().slice(0, 10),
+    lastOutcome: outcome || '',
+    updatedAt: new Date().toISOString()
+  }, { merge: true });
+  if (outcome === 'Bad Number') {
+    await db.collection('dispoBuyers').doc(item.buyer.id).set({ status: 'needs_retrace' }, { merge: true });
+  }
+}
+async function dialerNext() {
+  await persistDialerOutcome();
+  document.getElementById('dispo-dialer').remove();
+  if (dialer.idx < dialer.queue.length - 1) {
+    dialer.idx++;
+    renderDialer();
+  } else {
+    const n = Object.keys(dialer.outcomes).length;
+    showToast(`Session done — ${n} buyer${n === 1 ? '' : 's'} logged`);
+    dialer = null;
+    await loadAll();
+  }
+}
+function dialerNav(dir) {
+  persistDialerOutcome().then(() => {
+    document.getElementById('dispo-dialer').remove();
+    dialer.idx = Math.max(0, Math.min(dialer.queue.length - 1, dialer.idx + dir));
+    renderDialer();
+  });
+}
+function closeDialer() {
+  persistDialerOutcome().then(() => {
+    const el = document.getElementById('dispo-dialer');
+    if (el) el.remove();
+    dialer = null;
+    loadAll();
+  });
 }
 
 /* ================= Buyer form + detail ================= */
