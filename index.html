@@ -8,6 +8,8 @@
 <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700&family=Inter:wght@400;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   html { -webkit-text-size-adjust: 100%; }
@@ -144,7 +146,14 @@
   .empty-state { text-align: center; color: #5c6b82; padding: 40px 20px; font-size: 14px; }
   .toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); background: #16294a; border: 1px solid #d4a843; color: #e8c476; padding: 12px 22px; border-radius: 12px; font-weight: 700; z-index: 9999; display: none; }
   .btn-ghost.armed { border-color: #e07a77 !important; color: #fff !important; background: rgba(217,83,79,.25) !important; animation: armPulse 1s ease-in-out infinite; }
-  @keyframes armPulse { 0%,100% { box-shadow: 0 0 0 0 rgba(217,83,79,.4); } 50% { box-shadow: 0 0 0 6px rgba(217,83,79,0); } }  .toolbar { display: flex; gap: 8px; margin-bottom: 14px; flex-wrap: wrap; align-items: center; }
+  @keyframes armPulse { 0%,100% { box-shadow: 0 0 0 0 rgba(217,83,79,.4); } 50% { box-shadow: 0 0 0 6px rgba(217,83,79,0); } }
+  /* Buyer search */
+  #buyer-map { height: 380px; border-radius: 14px; border: 1px solid #2a4a73; z-index: 1; }
+  .leaflet-container { background: #0b1626; font-family: 'Inter', sans-serif; }
+  .search-card { cursor: pointer; }
+  .search-card:hover { border-color: rgba(212,168,67,.4); }
+  .status-badge { font-size: 11px; font-weight: 700; padding: 3px 10px; border-radius: 20px; border: 1px solid; white-space: nowrap; }
+  @media (max-width: 640px){ #buyer-map { height: 320px; } }  .toolbar { display: flex; gap: 8px; margin-bottom: 14px; flex-wrap: wrap; align-items: center; }
   .search-wrap { position: relative; flex: 1 1 220px; }
   .search-wrap input { width: 100%; padding: 11px 12px 11px 38px; border-radius: 10px; border: 1px solid #22385a; background: #0b1626; color: #e9edf3; font-size: 14px; }
   .search-wrap span { position: absolute; left: 12px; top: 11px; }
@@ -183,6 +192,7 @@
     <div class="tabs" style="border-bottom:none; margin: 10px 0 0;">
       <button class="tab-btn active" data-tab="deals">📦 Deals <span class="pill" id="deals-pill">0</span></button>
       <button class="tab-btn" data-tab="buyers">🤝 Buyers <span class="pill" id="buyers-pill">0</span></button>
+      <button class="tab-btn" data-tab="find">🔍 Find Buyers</button>
       <button class="tab-btn" data-tab="kpis">📊 KPIs</button>
     </div>
   </div>
@@ -506,8 +516,12 @@ async function importBuyers() {
 /* ================= Tab switching + boot ================= */
 function switchTab(t) {
   tab = t; openDealId = null; openBuyerId = null;
+  if (window._buyerMap) { try { window._buyerMap.remove(); } catch (e) {} window._buyerMap = null; }
   document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === t));
-  if (t === 'deals') renderDeals(); else if (t === 'buyers') renderBuyers(); else renderKPIs();
+  if (t === 'deals') renderDeals();
+  else if (t === 'buyers') renderBuyers();
+  else if (t === 'find') renderBuyerSearch();
+  else renderKPIs();
 }
 document.querySelectorAll('.tab-btn').forEach(b => b.onclick = () => switchTab(b.dataset.tab));
 $('add-deal-btn').onclick = () => showDealForm();
@@ -993,6 +1007,243 @@ async function submitPublicOffer(dealId) {
     console.error(e);
     showToast('Could not submit — please call instead');
   }
+}
+
+/* ================= Find Buyers (InvestorBase-style search) =================
+   DISPO MANAGER handoff contract:
+   - Luca submits a search here → doc in `dispoBuyerSearches` with status 'requested'.
+   - DISPO MANAGER reads the queue, researches per Luca's buyer-finding instructions
+     (county-records cash purchases within radius + monthsBack of the subject),
+     and writes each found buyer purchase to `dispoBuyerSearchResults`:
+     { searchId, buyerName, purchaseAddress, soldPrice, soldDate, lat, lng, buyerId? }
+   - She flips the search status to 'complete' when done.
+   - From the app, any result can be pushed into the Buyers DB via "Add to Buyers". */
+async function geocodeAddress(addr) {
+  try {
+    const url = 'https://nominatim.openstreetmap.org/search?format=json&limit=1&q=' + encodeURIComponent(addr);
+    const res = await fetch(url, { headers: { 'Accept': 'application/json' } });
+    const data = await res.json();
+    if (data && data.length) return { lat: +data[0].lat, lng: +data[0].lon };
+  } catch (e) {}
+  return null;
+}
+async function renderBuyerSearch() {
+  $('content').innerHTML = '<div class="empty-state">Loading searches…</div>';
+  let searches = [];
+  try {
+    const snap = await db.collection('dispoBuyerSearches').get();
+    searches = snap.docs.map(d => ({ id: d.id, ...d.data() }))
+      .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+  } catch (e) {
+    $('content').innerHTML = '<div class="empty-state">⚠️ Search collections not ready yet — updating database rules, try again in a minute.</div>';
+    return;
+  }
+  $('content').innerHTML = `
+    <div class="detail-card">
+      <h2 style="font-size:18px;">🔍 Find Cash Buyers</h2>
+      <div class="addr-sub">Enter a property — DISPO MANAGER hunts cash buyers around it per your instructions. Results plot on the map.</div>
+      <div class="form-field" style="margin-bottom:10px;"><label>Property address *</label>
+        <input id="bs-address" placeholder="123 Main St, Thomaston, GA 30286" style="width:100%;padding:13px 12px;border-radius:10px;border:1px solid #22385a;background:#0b1626;color:#e9edf3;font-size:16px;">
+      </div>
+      <div class="form-grid">
+        <div class="form-field"><label>Search radius</label><select id="bs-radius">
+          <option value="0.5">0.5 mile</option><option value="1" selected>1 mile</option>
+          <option value="2">2 miles</option><option value="3">3 miles</option><option value="5">5 miles</option>
+        </select></div>
+        <div class="form-field"><label>Cash purchases within</label><select id="bs-months">
+          <option value="6">Last 6 months</option><option value="12" selected>Last 12 months</option>
+        </select></div>
+      </div>
+      <div class="form-field" style="margin-top:10px;"><label>Notes for DISPO MANAGER</label>
+        <textarea id="bs-notes" placeholder="Anything specific about this search…" style="width:100%;padding:12px;border-radius:10px;border:1px solid #22385a;background:#0b1626;color:#e9edf3;font-size:15px;min-height:56px;"></textarea>
+      </div>
+      <button class="btn-gold" style="width:100%;min-height:52px;margin-top:14px;font-size:16px;" onclick="submitBuyerSearch()">🔍 Request Buyer Search</button>
+    </div>
+    <div class="section-label">Search history (${searches.length})</div>
+    <div id="search-list">
+      ${searches.length ? searches.map(s => `
+        <div class="buyer-card search-card" onclick="openBuyerSearch('${s.id}')">
+          <div class="buyer-top">
+            <span class="buyer-name" style="font-size:15px;">${esc(s.address)}</span>
+            ${s.status === 'complete'
+              ? '<span class="status-badge" style="color:#4caf82;border-color:#4caf82;background:#4caf8218;">✓ Complete</span>'
+              : '<span class="status-badge" style="color:#e8c476;border-color:#e8c476;background:#e8c47618;">⏳ Searching</span>'}
+          </div>
+          <div class="buyer-stats">
+            <span>📍 ${esc(s.radiusMiles)} mi radius</span>
+            <span>🕐 Last ${esc(s.monthsBack)} mo</span>
+            <span>📅 ${esc(fmtDate((s.createdAt || '').slice(0, 10)))}</span>
+            <span>🎯 <b data-rcount="${s.id}">…</b> buyers found</span>
+          </div>
+        </div>`).join('') : '<div class="timeline-empty">No searches yet — run your first one above.</div>'}
+    </div>`;
+  // Fill result counts
+  const rsnap = await db.collection('dispoBuyerSearchResults').get();
+  const counts = {};
+  rsnap.docs.forEach(doc => { const r = doc.data(); counts[r.searchId] = (counts[r.searchId] || 0) + 1; });
+  document.querySelectorAll('[data-rcount]').forEach(el => { el.textContent = counts[el.dataset.rcount] || 0; });
+}
+async function submitBuyerSearch() {
+  const address = ($('bs-address').value || '').trim();
+  if (!address) { showToast('Enter a property address'); return; }
+  const radiusMiles = +$('bs-radius').value;
+  const monthsBack = +$('bs-months').value;
+  const notes = ($('bs-notes').value || '').trim();
+  showToast('Locating property…');
+  const geo = await geocodeAddress(address + ', USA');
+  const rec = {
+    address, radiusMiles, monthsBack, notes,
+    status: 'requested',
+    lat: geo ? geo.lat : '', lng: geo ? geo.lng : '',
+    createdAt: new Date().toISOString()
+  };
+  const ref = await db.collection('dispoBuyerSearches').add(rec);
+  showToast('Search requested — DISPO MANAGER is on it');
+  openBuyerSearch(ref.id);
+}
+async function openBuyerSearch(id) {
+  const doc = await db.collection('dispoBuyerSearches').doc(id).get();
+  if (!doc.exists) { renderBuyerSearch(); return; }
+  const s = { id: doc.id, ...doc.data() };
+  const rsnap = await db.collection('dispoBuyerSearchResults').where('searchId', '==', id).get();
+  const results = rsnap.docs.map(d => ({ id: d.id, ...d.data() }))
+    .sort((a, b) => (+b.soldPrice || 0) - (+a.soldPrice || 0));
+  const hasGeo = s.lat && s.lng;
+  $('content').innerHTML = `
+    <button class="back-btn" onclick="renderBuyerSearch()">← Back to Find Buyers</button>
+    <div class="detail-card">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap;">
+        <div>
+          <h2 style="font-size:19px;">${esc(s.address)}</h2>
+          <div class="addr-sub">📍 ${esc(s.radiusMiles)} mi radius · 🕐 cash buys, last ${esc(s.monthsBack)} months · ${esc(fmtDate((s.createdAt || '').slice(0, 10)))}</div>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+          ${s.status === 'complete'
+            ? '<span class="status-badge" style="color:#4caf82;border-color:#4caf82;background:#4caf8218;">✓ Complete</span>'
+            : '<span class="status-badge" style="color:#e8c476;border-color:#e8c476;background:#e8c47618;">⏳ Searching</span>'}
+          <button class="btn-ghost" onclick="armConfirm(this, () => deleteBuyerSearch('${s.id}'))" style="color:#e07a77;border-color:rgba(217,83,79,.4);padding:8px 12px;min-height:0;">🗑️ Delete</button>
+        </div>
+      </div>
+      ${s.notes ? `<div style="font-size:13px;color:#aeb9c7;font-style:italic;margin-bottom:10px;">"${esc(s.notes)}"</div>` : ''}
+      ${hasGeo ? '<div id="buyer-map"></div>' : '<div class="timeline-empty">📍 Could not auto-locate this address — DISPO MANAGER will pin it when results come in.</div>'}
+      <div style="font-size:11px;color:#5c6b82;margin-top:8px;text-align:right;">© OpenStreetMap contributors</div>
+    </div>
+    <div class="detail-card">
+      <h2 style="font-size:18px;">🎯 Buyers Found <span style="color:#8a97a8;font-size:13px;font-weight:400;">(${results.length})</span></h2>
+      <div id="search-results">
+        ${results.length ? results.map(r => `
+          <div class="match-row">
+            <div class="match-info">
+              <div class="n">${esc(r.buyerName || 'Unknown buyer')}</div>
+              <div class="w">💰 ${money(r.soldPrice)} · ${esc(fmtDate(r.soldDate))} · 📍 ${esc(r.purchaseAddress || '')}</div>
+            </div>
+            ${r.buyerId
+              ? '<span style="font-size:12px;color:#4caf82;">✓ In Buyers DB</span>'
+              : `<button class="btn-ghost" style="padding:8px 12px;min-height:0;flex-shrink:0;" onclick="pushResultToBuyers('${r.id}')">+ Add to Buyers</button>`}
+          </div>`).join('') : '<div class="timeline-empty">No buyers logged yet — DISPO MANAGER adds them here as the research comes in.</div>'}
+      </div>
+    </div>
+    <div class="detail-card">
+      <h2 style="font-size:18px;">➕ Log a Found Buyer</h2>
+      <div class="addr-sub">For DISPO MANAGER (or you) — pins a cash buyer purchase on the map.</div>
+      <div class="form-grid">
+        <div class="form-field"><label>Buyer name *</label><input id="br-name"></div>
+        <div class="form-field"><label>Purchase address *</label><input id="br-addr" placeholder="Street, City, GA ZIP"></div>
+        <div class="form-field"><label>Sold price $</label><input type="number" id="br-price"></div>
+        <div class="form-field"><label>Sold date</label><input type="date" id="br-date"></div>
+      </div>
+      <button class="btn-gold" style="margin-top:12px;" onclick="logSearchResult('${id}')">📍 Log Buyer Purchase</button>
+      <div style="font-size:12px;color:#8a97a8;margin-top:8px;">Address is auto-pinned on the map — no coordinates needed.</div>
+    </div>`;
+  window.scrollTo(0, 0);
+  if (hasGeo) initBuyerMap(s, results);
+}
+function initBuyerMap(s, results) {
+  try {
+    if (window._buyerMap) { window._buyerMap.remove(); window._buyerMap = null; }
+    const map = L.map('buyer-map').setView([s.lat, s.lng], 13);
+    window._buyerMap = map;
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(map);
+    // Radius circle
+    L.circle([s.lat, s.lng], {
+      radius: s.radiusMiles * 1609.34, color: '#d4a843', weight: 2,
+      fillColor: '#d4a843', fillOpacity: 0.08, dashArray: '6 6'
+    }).addTo(map);
+    // Subject marker (gold)
+    const starIcon = L.divIcon({
+      className: '', html: '<div style="font-size:26px;filter:drop-shadow(0 2px 4px rgba(0,0,0,.6));">⭐</div>',
+      iconSize: [26, 26], iconAnchor: [13, 13]
+    });
+    L.marker([s.lat, s.lng], { icon: starIcon }).addTo(map)
+      .bindPopup(`<b>Subject</b><br>${esc(s.address)}`);
+    // Buyer purchase markers (blue)
+    const dotIcon = L.divIcon({
+      className: '', html: '<div style="width:16px;height:16px;border-radius:50%;background:#4a9fe0;border:2px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.5);"></div>',
+      iconSize: [16, 16], iconAnchor: [8, 8]
+    });
+    const pts = [[s.lat, s.lng]];
+    results.forEach(r => {
+      if (!r.lat || !r.lng) return;
+      pts.push([r.lat, r.lng]);
+      L.marker([r.lat, r.lng], { icon: dotIcon }).addTo(map)
+        .bindPopup(`<b>${esc(r.buyerName || '')}</b><br>💰 ${money(r.soldPrice)} · ${esc(fmtDate(r.soldDate))}<br>📍 ${esc(r.purchaseAddress || '')}`);
+    });
+    if (pts.length > 1) map.fitBounds(pts, { padding: [30, 30] });
+    setTimeout(() => map.invalidateSize(), 300);
+  } catch (e) { console.error('map failed', e); }
+}
+async function logSearchResult(searchId) {
+  const buyerName = ($('br-name').value || '').trim();
+  const purchaseAddress = ($('br-addr').value || '').trim();
+  if (!buyerName || !purchaseAddress) { showToast('Buyer name and purchase address are required'); return; }
+  showToast('Pinning purchase on map…');
+  const geo = await geocodeAddress(purchaseAddress + ', USA');
+  await db.collection('dispoBuyerSearchResults').add({
+    searchId, buyerName, purchaseAddress,
+    soldPrice: +($('br-price').value || 0) || '',
+    soldDate: $('br-date').value || '',
+    lat: geo ? geo.lat : '', lng: geo ? geo.lng : '',
+    buyerId: '', createdAt: new Date().toISOString()
+  });
+  showToast('Buyer purchase logged');
+  openBuyerSearch(searchId);
+}
+async function deleteBuyerSearch(id) {
+  showToast('Deleting search…');
+  const rsnap = await db.collection('dispoBuyerSearchResults').where('searchId', '==', id).get();
+  for (const doc of rsnap.docs) await db.collection('dispoBuyerSearchResults').doc(doc.id).delete();
+  await db.collection('dispoBuyerSearches').doc(id).delete();
+  showToast('Search deleted');
+  renderBuyerSearch();
+}
+async function pushResultToBuyers(resultId) {  const doc = await db.collection('dispoBuyerSearchResults').doc(resultId).get();
+  if (!doc.exists) return;
+  const r = doc.data();
+  // Avoid dupes: match by name
+  const existing = buyers.find(b => String(b.name || '').toLowerCase() === String(r.buyerName || '').toLowerCase());
+  let buyerId;
+  if (existing) {
+    buyerId = existing.id;
+    await db.collection('dispoBuyers').doc(buyerId).set({
+      sourceDetail: ((existing.sourceDetail || '') + ` | Buyer search: ${r.purchaseAddress} ${money(r.soldPrice)} (${fmtDate(r.soldDate)})`).trim(),
+      updatedAt: new Date().toISOString()
+    }, { merge: true });
+  } else {
+    const ref = await db.collection('dispoBuyers').add({
+      name: r.buyerName, type: '', phone: '', email: '', mailingAddress: '',
+      buyingCity: '', buyingCounty: '', buyingZip: '',
+      buyBox: '', source: 'Buyer Search', sourceDetail: `${r.purchaseAddress} — cash ${money(r.soldPrice)} (${fmtDate(r.soldDate)})`,
+      cashBuys12mo: '1', dateAdded: new Date().toISOString().slice(0, 10),
+      lastVerified: new Date().toISOString().slice(0, 10),
+      notes: '', status: 'active', updatedAt: new Date().toISOString()
+    });
+    buyerId = ref.id;
+  }
+  await db.collection('dispoBuyerSearchResults').doc(resultId).set({ buyerId }, { merge: true });
+  showToast(existing ? 'Linked to existing buyer' : 'Buyer added to Buyers DB');
+  await loadAll();
+  const sdoc = await db.collection('dispoBuyerSearches').doc(r.searchId).get();
+  if (sdoc.exists) openBuyerSearch(r.searchId);
 }
 
 /* ================= KPI dashboard ================= */
