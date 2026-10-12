@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<title>Dispo Hub — Deal Disposition CRM</title>
+<title>DispoHub — Deal Disposition CRM</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700&family=Inter:wght@400;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
@@ -31,8 +31,8 @@
   }
   .header-inner, .content { max-width: 1120px; margin: 0 auto; }
   .header-inner { display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap; }
-  .brand h1 { font-family: 'Cinzel', serif; font-size: 25px; font-weight: 700; color: #e8c476; letter-spacing: .02em; }
-  .brand .sub { font-size: 11px; letter-spacing: .18em; color: #d4a843; font-weight: 700; text-transform: uppercase; margin-bottom: 2px; }
+  .brand { display: flex; align-items: center; gap: 12px; }
+  .brand h1 { font-family: 'Cinzel', serif; font-size: 25px; font-weight: 700; color: #e8c476; letter-spacing: .02em; margin: 0; }
   .header-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 
   .btn-gold {
@@ -180,8 +180,24 @@
 <div class="header" id="site-header">
   <div class="header-inner">
     <div class="brand">
-      <div class="sub">Disposition CRM</div>
-      <h1>DISPO HUB</h1>
+      <svg width="44" height="38" viewBox="0 0 72 62" aria-hidden="true" style="flex-shrink:0;">
+        <defs>
+          <linearGradient id="rgrGold" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stop-color="#f9ec9e"/>
+            <stop offset=".45" stop-color="#e3b95c"/>
+            <stop offset="1" stop-color="#a67c1f"/>
+          </linearGradient>
+        </defs>
+        <g fill="url(#rgrGold)">
+          <path d="M26 16 L29.5 6 L34 13 L38 4 L42 13 L46.5 6 L50 16 L48 21 L28 21 Z"/>
+          <circle cx="29.5" cy="5" r="2.1"/>
+          <circle cx="38" cy="3" r="2.3"/>
+          <circle cx="46.5" cy="5" r="2.1"/>
+          <rect x="28" y="22.5" width="20" height="3" rx="1.2"/>
+        </g>
+        <text x="37" y="56" text-anchor="middle" font-family="Georgia,'Times New Roman',serif" font-style="italic" font-weight="700" font-size="30" fill="url(#rgrGold)" letter-spacing="-1">RR</text>
+      </svg>
+      <h1>DispoHub</h1>
     </div>
     <div class="header-actions">
       <button class="btn-ghost" id="import-buyers-btn" title="Import buyers from Google Sheet">📥 Import Buyers</button>
@@ -919,7 +935,7 @@ function publicDealURL(id) {
   return location.origin + location.pathname + '?deal=' + id;
 }
 async function renderPublicDeal(id) {
-  document.title = 'Deal — Dispo Hub';
+  document.title = 'Deal — DispoHub';
   try {
     const doc = await db.collection('dispoDeals').doc(id).get();
     if (!doc.exists) {
@@ -976,7 +992,7 @@ async function renderPublicDeal(id) {
           <div style="font-size:14px;color:#8a97a8;margin-top:6px;">We'll review it and reach out shortly.</div>
         </div>
       </div>
-      <div style="text-align:center;color:#5c6b82;font-size:12px;margin-top:22px;">Powered by Dispo Hub</div>
+      <div style="text-align:center;color:#5c6b82;font-size:12px;margin-top:22px;">Powered by DispoHub</div>
     </div>`;
     window.scrollTo(0, 0);
   } catch (e) {
