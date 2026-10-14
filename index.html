@@ -119,6 +119,25 @@
   .num-box .v.green { color: #4caf82; }
   .num-box input { width: 100%; background: transparent; border: none; color: #e8c476; font-family: 'JetBrains Mono', monospace; font-size: 19px; font-weight: 800; outline: none; }
   .section-label { font-size: 11px; letter-spacing: .14em; text-transform: uppercase; color: #d4a843; font-weight: 700; margin: 18px 0 10px; }
+  .photo-section { margin-top: 4px; }
+  .drive-link-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .drive-link-row input {
+    flex: 1 1 220px; padding: 10px 12px; border-radius: 10px; border: 1px solid #22385a; background: #0b1626;
+    color: #e9edf3; font-size: 14px;
+  }
+  .drive-open-btn {
+    background: #d4a843; color: #0d1b2e; border: none; border-radius: 10px; padding: 10px 16px;
+    font-size: 13px; font-weight: 700; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    text-decoration: none; display: inline-block;
+  }
+  .drive-edit-btn {
+    background: #142640; color: #9fb3cc; border: 1px solid #22385a; border-radius: 10px; padding: 10px 12px;
+    font-size: 14px; cursor: pointer;
+  }
+  .drive-carousel { display: flex; gap: 8px; overflow-x: auto; margin-top: 12px; padding-bottom: 4px; }
+  .drive-thumb-link { flex: 0 0 auto; }
+  .drive-thumb { width: 76px; height: 76px; object-fit: cover; border-radius: 8px; border: 1px solid #3a5a85; display: block; }
+  .drive-carousel-msg { font-size: 12px; color: #8a97a8; margin-top: 8px; }
   .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
   .form-field label { display: block; font-size: 11px; color: #8a97a8; margin-bottom: 5px; font-weight: 600; }
   .form-field input, .form-field select, .form-field textarea {
@@ -229,6 +248,10 @@ const firebaseConfig = {
 };
 firebase.initializeApp(firebaseConfig);
 const db = firebase.firestore();
+
+/* Google Drive API key — powers the deal photo carousel (reads folders shared
+   as "Anyone with the link"). Same key as the GA Probates CRM. */
+const GOOGLE_API_KEY = '<redacted>';
 
 /* ---------------- Stages ---------------- */
 const DEAL_STAGES = [
@@ -596,6 +619,11 @@ function showDealForm(dealId) {
       </div>
       <div class="section-label">Notes</div>
       <div class="form-field"><textarea id="df-notes" placeholder="Condition, access, showing instructions…">${esc(d.notes || '')}</textarea></div>
+      <div class="section-label">Photos</div>
+      <div class="form-field">
+        <label>Google Drive folder link (share the folder as "Anyone with the link")</label>
+        <input type="text" id="df-driveFolderUrl" placeholder="https://drive.google.com/drive/folders/…" value="${esc(d.driveFolderUrl || '')}">
+      </div>
       <div style="margin-top:18px;display:flex;gap:10px;flex-wrap:wrap;">
         <button class="btn-gold" onclick="saveDealForm('${d.id || ''}')">💾 Save Deal</button>
         ${d.id ? `<button class="btn-ghost" onclick="openDeal('${d.id}')">Cancel</button>` : `<button class="btn-ghost" onclick="switchTab('deals')">Cancel</button>`}
@@ -613,6 +641,7 @@ async function saveDealForm(id) {
     contractPrice: num('contractPrice'), arv: num('arv'), repairEst: num('repairEst'),
     askPrice: num('askPrice'), assignmentFee: num('assignmentFee'), closeByDate: v('closeByDate'),
     sellerName: v('sellerName'), sellerPhone: v('sellerPhone'), notes: $('df-notes').value.trim(),
+    driveFolderUrl: v('driveFolderUrl'),
     updatedAt: new Date().toISOString()
   };
   if (!rec.address) { showToast('Address is required'); return; }
@@ -679,6 +708,23 @@ async function openDeal(id) {
       <div style="font-size:14px;color:#aeb9c7;">${esc(d.beds || '—')} bd · ${esc(d.baths || '—')} ba · ${d.sqft ? (+d.sqft).toLocaleString() + ' sqft' : '—'} · ${esc(d.propertyType || '—')}${d.yearBuilt ? ' · Built ' + esc(d.yearBuilt) : ''}</div>
       ${d.sellerName || d.sellerPhone ? `<div class="section-label">Seller</div><div style="font-size:14px;">${esc(d.sellerName || '')} ${d.sellerPhone ? `· <a class="call-link" href="tel:${digitsOnly(d.sellerPhone)}">📞 ${esc(formatPhone(d.sellerPhone))}</a>` : ''}</div>` : ''}
       ${d.notes ? `<div class="section-label">Notes</div><div style="font-size:14px;color:#aeb9c7;line-height:1.6;white-space:pre-wrap;">${esc(d.notes)}</div>` : ''}
+      <div class="section-label">Photos</div>
+      <div class="photo-section">
+        ${(!d.driveFolderUrl || editingDriveFor === d.id) ? `
+          <div class="drive-link-row">
+            <input type="text" id="drive-link-input" placeholder="Paste the Google Drive folder link for this property" value="${esc(d.driveFolderUrl || '')}">
+            <button class="btn-gold" style="padding:10px 16px;min-height:0;" onclick="saveDriveLink('${d.id}')">Save</button>
+            ${d.driveFolderUrl ? `<button class="btn-ghost" style="padding:10px 14px;min-height:0;" onclick="editingDriveFor=null;openDeal('${d.id}')">Cancel</button>` : ''}
+          </div>
+          <div style="font-size:12px;color:#8a97a8;margin-top:6px;">Share the Drive folder as "Anyone with the link" so the photos load here.</div>
+        ` : `
+          <div class="drive-link-row">
+            <a class="drive-open-btn" href="${esc(d.driveFolderUrl)}" target="_blank" rel="noopener" id="drive-link-name-${d.id}">📁 Loading folder name…</a>
+            <button class="drive-edit-btn" onclick="editingDriveFor='${d.id}';openDeal('${d.id}')" title="Change link">✎</button>
+          </div>
+          <div class="drive-carousel" id="drive-carousel-${d.id}"></div>
+        `}
+      </div>
       <div style="margin-top:18px;display:flex;gap:10px;flex-wrap:wrap;">
         <button class="btn-gold" onclick="shareDeal('${d.id}')">🔗 Share Deal Page</button>
         <button class="btn-ghost" onclick='showDealForm(${JSON.stringify(d.id)})'>✏️ Edit</button>
@@ -740,6 +786,10 @@ async function openDeal(id) {
     </div>
   </div>`;
   window.scrollTo(0, 0);
+  if (d.driveFolderUrl && editingDriveFor !== d.id) {
+    fetchDrivePhotos(d.id, d.driveFolderUrl);
+    fetchDriveFolderName(d.id, d.driveFolderUrl);
+  }
 }
 async function deleteOffer(dealId, offerId) {
   await db.collection('dispoOffers').doc(offerId).delete();
@@ -775,6 +825,74 @@ async function addDealNote(id) {
   await logActivity(id, text);
   showToast('Note added');
   openDeal(id);
+}
+/* ---------------- Deal photos (Google Drive folder link) ---------------- */
+const driveCache = {}; // folderId -> { status, files, name }
+let editingDriveFor = null;
+function extractDriveFolderId(url) {
+  if (!url) return null;
+  const m = url.match(/folders\/([a-zA-Z0-9_-]+)/);
+  return m ? m[1] : null;
+}
+async function saveDriveLink(dealId) {
+  const inp = document.getElementById('drive-link-input');
+  const url = (inp.value || '').trim();
+  if (!url) { showToast('Paste a Drive folder link first'); return; }
+  if (!extractDriveFolderId(url)) { showToast("That doesn't look like a Drive folder link", 'error'); return; }
+  await db.collection('dispoDeals').doc(dealId).set({ driveFolderUrl: url, updatedAt: new Date().toISOString() }, { merge: true });
+  editingDriveFor = null;
+  await loadAll(); openDeal(dealId);
+  showToast('Photo folder saved');
+}
+async function fetchDrivePhotos(dealId, folderUrl) {
+  const container = document.getElementById('drive-carousel-' + dealId);
+  if (!container) return;
+  const folderId = extractDriveFolderId(folderUrl);
+  if (!folderId) { container.innerHTML = `<div class="drive-carousel-msg">Couldn't read a folder link from that URL.</div>`; return; }
+  if (driveCache[folderId] && driveCache[folderId].status === 'done') { renderDriveCarousel(dealId, driveCache[folderId].files); return; }
+  if (driveCache[folderId] && driveCache[folderId].status === 'error') {
+    container.innerHTML = `<div class="drive-carousel-msg">Couldn't load photos — make sure the folder is shared as "Anyone with the link".</div>`; return;
+  }
+  container.innerHTML = `<div class="drive-carousel-msg">Loading photos…</div>`;
+  try {
+    const q = encodeURIComponent(`'${folderId}' in parents and mimeType contains 'image/' and trashed = false`);
+    const res = await fetch(`https://www.googleapis.com/drive/v3/files?q=${q}&key=${GOOGLE_API_KEY}&fields=files(id,name,thumbnailLink)&pageSize=50`);
+    const data = await res.json();
+    if (data.error) throw new Error(data.error.message);
+    const files = data.files || [];
+    driveCache[folderId] = { status: 'done', files };
+    renderDriveCarousel(dealId, files);
+  } catch (e) {
+    driveCache[folderId] = { status: 'error' };
+    container.innerHTML = `<div class="drive-carousel-msg">Couldn't load photos — make sure the folder is shared as "Anyone with the link".</div>`;
+  }
+}
+function renderDriveCarousel(dealId, files) {
+  const container = document.getElementById('drive-carousel-' + dealId);
+  if (!container) return;
+  if (!files.length) { container.innerHTML = `<div class="drive-carousel-msg">No images found in that folder yet.</div>`; return; }
+  container.innerHTML = files.map(f => `
+    <a href="https://drive.google.com/file/d/${f.id}/view" target="_blank" rel="noopener" class="drive-thumb-link" title="${esc(f.name)}">
+      <img src="${f.thumbnailLink}" class="drive-thumb" loading="lazy" />
+    </a>`).join('');
+}
+async function fetchDriveFolderName(dealId, folderUrl) {
+  const linkEl = document.getElementById('drive-link-name-' + dealId);
+  if (!linkEl) return;
+  const folderId = extractDriveFolderId(folderUrl);
+  if (!folderId) { linkEl.textContent = '📁 Open Photos'; return; }
+  if (driveCache[folderId] && driveCache[folderId].name) { linkEl.textContent = '📁 ' + driveCache[folderId].name; return; }
+  try {
+    const res = await fetch(`https://www.googleapis.com/drive/v3/files/${folderId}?key=${GOOGLE_API_KEY}&fields=name`);
+    const data = await res.json();
+    if (data.error) throw new Error(data.error.message);
+    driveCache[folderId] = { ...(driveCache[folderId] || {}), name: data.name };
+    const stillThere = document.getElementById('drive-link-name-' + dealId);
+    if (stillThere) stillThere.textContent = '📁 ' + data.name;
+  } catch (e) {
+    const stillThere = document.getElementById('drive-link-name-' + dealId);
+    if (stillThere) stillThere.textContent = '📁 Open Photos';
+  }
 }
 function showOfferForm(dealId) {
   const d = deals.find(x => x.id === dealId);
