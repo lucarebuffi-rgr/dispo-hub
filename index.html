@@ -632,7 +632,10 @@ $('import-buyers-btn').onclick = () => importBuyers();
 })();
 
 /* ================= Deal form (add / edit) ================= */
-function showDealForm(dealId) {
+function showDealForm(dealId, searchId) {
+  // Link a fresh deal back to the Find Buyers search that spawned it (prefill only).
+  // Every other open (blank add, edit) resets it so the link can't leak onto the wrong deal.
+  window.pendingDealSearchId = searchId || '';
   const d = dealId ? (deals.find(x => x.id === dealId) || {}) : {};
   const fld = (key, label, val, type) =>
     `<div class="form-field"><label>${label}</label><input type="${type || 'text'}" id="df-${key}" value="${esc(val == null ? '' : val)}"></div>`;
@@ -706,6 +709,13 @@ async function saveDealForm(id) {
     rec.createdAt = new Date().toISOString();
     const ref = await db.collection('dispoDeals').add(rec);
     await logActivity(ref.id, 'Deal created — under contract');
+    if (window.pendingDealSearchId) {
+      try {
+        await db.collection('dispoBuyerSearches').doc(window.pendingDealSearchId).update({ dealId: ref.id });
+        await logActivity(ref.id, 'Linked to buyer search');
+      } catch (e) { console.error('search link failed', e); }
+    }
+    window.pendingDealSearchId = '';
     showToast('Deal added');
     await loadAll(); openDeal(ref.id);
   }
@@ -1387,12 +1397,14 @@ function askAddDealBoard(address, propertyTypes, searchId) {
   ov.querySelector('#adb-no').onclick = () => close(true);
   ov.querySelector('#adb-yes').onclick = () => {
     ov.remove();
-    prefillDealForm(address, propertyTypes);
+    prefillDealForm(address, propertyTypes, searchId);
   };
 }
 // Open a blank deal form with the search address + property type filled in
-function prefillDealForm(address, propertyTypes) {
-  showDealForm();
+// searchId: when the deal is spawned from a Find Buyers search, the new deal
+// links back to that search on save (so pulled buyers land on the right deal)
+function prefillDealForm(address, propertyTypes, searchId) {
+  showDealForm(null, searchId || '');
   const parts = String(address || '').split(',').map(x => x.trim()).filter(Boolean);
   if ($('df-address')) $('df-address').value = parts[0] || address || '';
   if (parts.length >= 2 && $('df-city')) $('df-city').value = parts[1] || '';
