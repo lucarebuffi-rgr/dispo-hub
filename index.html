@@ -728,6 +728,8 @@ async function openDeal(id) {
       return r;
     }).sort((a, b) => (a.createdAt || '').localeCompare(b.createdAt || '')); // InvestorBase rank order: best match first
   } catch (e) { pulledBuyers = []; }
+  const topRanked = pulledBuyers.filter(r => r.smartMatch === true);
+  const otherPulled = pulledBuyers.filter(r => r.smartMatch !== true);
   const activity = await getActivity(id);
   const compsSnap = await db.collection('dispoComps').where('dealId', '==', id).get();
   const allComps = compsSnap.docs.map(c => ({ id: c.id, ...c.data() })).sort((a, b) => (+b.soldPrice || 0) - (+a.soldPrice || 0));
@@ -799,10 +801,10 @@ async function openDeal(id) {
     </div>
 
     <div class="detail-card">
-      <h2 style="font-size:18px;">⭐ Priority Buyers <span style="color:#8a97a8;font-size:13px;font-weight:400;">(${pulledBuyers.length})</span></h2>
-      <div class="addr-sub">InvestorBase pulls for this deal — best matches first.</div>
-      ${pulledBuyers.length ? `<button class="btn-gold" style="width:100%;min-height:52px;margin-bottom:12px;" onclick="startDialer('${id}')">📞 Start Call Session (${pulledBuyers.length} buyers)</button>` : ''}
-      ${pulledBuyers.length ? pulledBuyers.map((pb, i) => {
+      <h2 style="font-size:18px;">🏆 Top Ranked Buyers <span style="color:#8a97a8;font-size:13px;font-weight:400;">(${topRanked.length})</span></h2>
+      <div class="addr-sub">InvestorBase Smart Match picks for this deal — call these first.</div>
+      ${topRanked.length ? `<button class="btn-gold" style="width:100%;min-height:52px;margin-bottom:12px;" onclick="startDialer('${id}')">📞 Start Call Session (${topRanked.length} buyers)</button>` : ''}
+      ${topRanked.length ? topRanked.map(pb => {
         const b = pb._buyer;
         const nm = (b && b.name) || pb.buyerName || 'Unknown buyer';
         const person = b ? [b.firstName, b.lastName].filter(Boolean).join(' ') : '';
@@ -811,13 +813,34 @@ async function openDeal(id) {
         return `
         <div class="match-row"${b ? ` onclick="openBuyer('${b.id}')" style="cursor:pointer;"` : ''}>
           <div class="match-info">
-            <div class="n">${esc(nm)}${i < 3 ? ' <span style="color:#d4a843;font-size:12px;font-weight:700;">★ Best match</span>' : ''}</div>
+            <div class="n">🏆 ${esc(nm)}</div>
             ${person ? `<div class="w" style="color:#e8c476;">👤 ${esc(person)}</div>` : ''}
             <div class="w">${addr ? '📍 ' + esc(addr) : ''}${addr && price ? ' · ' : ''}${price ? '💰 ' + esc(price) : ''}${!addr && !price ? '—' : ''}</div>
           </div>
           ${b && b.phone ? `<a class="call-link match-call" href="tel:${digitsOnly(b.phone)}" onclick="event.stopPropagation()">📞</a>` : `<span style="font-size:12px;color:#5c6b82;">${b ? 'no phone' : ''}</span>`}
         </div>`;
-      }).join('') : '<div class="timeline-empty">No InvestorBase buyers pulled for this deal yet — tap 🔍 Search For Buyers above.</div>'}
+      }).join('') : '<div class="timeline-empty">No Smart Match buyers on this pull yet.</div>'}
+    </div>
+
+    <div class="detail-card">
+      <h2 style="font-size:18px;">📋 All Pulled Buyers <span style="color:#8a97a8;font-size:13px;font-weight:400;">(${otherPulled.length})</span></h2>
+      <div class="addr-sub">Every buyer from this deal's InvestorBase pulls.</div>
+      ${otherPulled.length ? otherPulled.map(pb => {
+        const b = pb._buyer;
+        const nm = (b && b.name) || pb.buyerName || 'Unknown buyer';
+        const person = b ? [b.firstName, b.lastName].filter(Boolean).join(' ') : '';
+        const addr = (b && b.boughtPropertyAddress) || pb.boughtPropertyAddress || pb.purchaseAddress || '';
+        const price = (b && b.boughtPropertyPrice) || pb.boughtPropertyPrice || (pb.soldPrice ? String(pb.soldPrice) : '');
+        return `
+        <div class="match-row"${b ? ` onclick="openBuyer('${b.id}')" style="cursor:pointer;"` : ''}>
+          <div class="match-info">
+            <div class="n">${esc(nm)}</div>
+            ${person ? `<div class="w" style="color:#e8c476;">👤 ${esc(person)}</div>` : ''}
+            <div class="w">${addr ? '📍 ' + esc(addr) : ''}${addr && price ? ' · ' : ''}${price ? '💰 ' + esc(price) : ''}${!addr && !price ? '—' : ''}</div>
+          </div>
+          ${b && b.phone ? `<a class="call-link match-call" href="tel:${digitsOnly(b.phone)}" onclick="event.stopPropagation()">📞</a>` : `<span style="font-size:12px;color:#5c6b82;">${b ? 'no phone' : ''}</span>`}
+        </div>`;
+      }).join('') : '<div class="timeline-empty">No other pulled buyers — tap 🔍 Search For Buyers above to run a pull.</div>'}
     </div>
 
     <div class="detail-card">
@@ -1795,17 +1818,18 @@ async function startDialer(dealId) {
     const psnap = await db.collection('dispoBuyerSearchResults').where('dealId', '==', dealId).get();
     queue = psnap.docs.map(doc => ({ id: doc.id, ...doc.data() }))
       .sort((a, b) => (a.createdAt || '').localeCompare(b.createdAt || '')) // InvestorBase rank order
-      .map((r, i) => {
+      .filter(r => r.smartMatch === true) // Top Ranked: InvestorBase Smart Match only
+      .map(r => {
         const b = r.buyerId ? (buyers.find(x => x.id === r.buyerId) || null) : null;
         if (!b) return null;
-        const why = [i < 3 ? '★ Best match' : 'Pulled from InvestorBase'];
+        const why = ['🏆 Smart Match · Pulled from InvestorBase'];
         const baddr = b.boughtPropertyAddress || r.boughtPropertyAddress || r.purchaseAddress || '';
         const bprice = b.boughtPropertyPrice || r.boughtPropertyPrice || (r.soldPrice ? String(r.soldPrice) : '');
         if (baddr || bprice) why.push('🏠 Bought: ' + baddr + (baddr && bprice ? ' for ' : '') + bprice);
         return { buyer: b, score: '', why };
       }).filter(Boolean);
   } catch (e) { queue = []; }
-  if (!queue.length) { showToast('No pulled buyers to call yet'); return; }
+  if (!queue.length) { showToast('No Smart Match buyers on this deal yet'); return; }
   dialer = { dealId, queue, idx: 0, outcomes: {} };
   renderDealDialer();
 }
