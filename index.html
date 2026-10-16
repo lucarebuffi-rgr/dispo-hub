@@ -621,7 +621,7 @@ $('import-buyers-btn').onclick = () => importBuyers();
       if (!header) return;
       const y = window.scrollY;
       if (y > 120 && y > lastY + 4) header.classList.add('header-hidden');
-      else if (y < lastY - 4 || y <= 120) header.classList.remove('header-hidden');
+      else if (y <= 120) header.classList.remove('header-hidden');
       lastY = y;
     });
   }, { passive: true });
