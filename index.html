@@ -1828,6 +1828,7 @@ function renderDealDialer() {
       <div class="detail-card" style="text-align:center;">
         <div style="font-size:22px;font-weight:800;">${esc(b.name)}</div>
         ${[b.firstName, b.lastName].filter(Boolean).join(' ') ? `<div style="font-size:16px;font-weight:700;color:#e8c476;margin-top:6px;">👤 ${esc([b.firstName, b.lastName].filter(Boolean).join(' '))}</div>` : ''}
+        ${b.mailingAddress ? `<div style="font-size:13px;color:#8a97a8;margin-top:4px;">📍 ${esc(b.mailingAddress)}</div>` : ''}
         <div style="font-size:13px;color:#8a97a8;margin-top:4px;">${esc(item.why.join(' · '))}</div>
         ${b.buyBox ? `<div style="font-size:13px;color:#aeb9c7;font-style:italic;margin-top:8px;">🎯 ${esc(b.buyBox)}</div>` : ''}
         ${b.phone
