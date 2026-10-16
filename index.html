@@ -472,6 +472,7 @@ function renderBuyers() {
           ${b.email ? `<span style="font-size:13px;color:#aeb9c7;">✉️ ${esc(b.email)}</span>` : ''}
         </div>
         <div class="buyer-buybox">🎯 ${esc(b.buyBox || 'No buy box recorded')}</div>
+        ${b.boughtPropertyAddress ? `<div class="buyer-buybox">🏠 Bought: ${esc(b.boughtPropertyAddress)}${b.boughtPropertyPrice ? ' · ' + esc(b.boughtPropertyPrice) : ''}</div>` : ''}
         <div class="buyer-stats">
           ${b.cashBuys12mo ? `<span>💰 <b>${esc(b.cashBuys12mo)}</b> cash buys / 12mo</span>` : ''}
           ${b.buyingCity || b.buyingCounty ? `<span>📍 ${esc([b.buyingCity, b.buyingCounty].filter(Boolean).join(', '))}</span>` : ''}
@@ -677,6 +678,16 @@ async function openDeal(id) {
   const matches = rankedBuyers(d);
   const offersSnap = await db.collection('dispoOffers').where('dealId', '==', id).get();
   const offers = offersSnap.docs.map(o => ({ id: o.id, ...o.data() })).sort((a, b) => (+b.amount || 0) - (+a.amount || 0));
+  // InvestorBase pulled buyers linked to this deal via dispoBuyerSearchResults
+  let pulledBuyers = [];
+  try {
+    const psnap = await db.collection('dispoBuyerSearchResults').where('dealId', '==', id).get();
+    pulledBuyers = psnap.docs.map(doc => {
+      const r = { id: doc.id, ...doc.data() };
+      r._buyer = r.buyerId ? (buyers.find(b => b.id === r.buyerId) || null) : null;
+      return r;
+    }).sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+  } catch (e) { pulledBuyers = []; }
   const activity = await getActivity(id);
   const compsSnap = await db.collection('dispoComps').where('dealId', '==', id).get();
   const allComps = compsSnap.docs.map(c => ({ id: c.id, ...c.data() })).sort((a, b) => (+b.soldPrice || 0) - (+a.soldPrice || 0));
@@ -759,6 +770,25 @@ async function openDeal(id) {
           </div>
           ${m.buyer.phone ? `<a class="call-link match-call" href="tel:${digitsOnly(m.buyer.phone)}">📞</a>` : `<span style="font-size:12px;color:#5c6b82;">no phone</span>`}
         </div>`).join('') : '<div class="timeline-empty">No buyers match this deal yet — add buyers or import from the sheet.</div>'}
+    </div>
+
+    <div class="detail-card">
+      <h2 style="font-size:18px;">🔗 Pulled Buyers <span style="color:#8a97a8;font-size:13px;font-weight:400;">(${pulledBuyers.length})</span></h2>
+      <div class="addr-sub">InvestorBase pulls linked to this deal — alongside the buy-box Matched Buyers above.</div>
+      ${pulledBuyers.length ? pulledBuyers.map(pb => {
+        const b = pb._buyer;
+        const nm = (b && b.name) || pb.buyerName || 'Unknown buyer';
+        const addr = (b && b.boughtPropertyAddress) || pb.boughtPropertyAddress || pb.purchaseAddress || '';
+        const price = (b && b.boughtPropertyPrice) || pb.boughtPropertyPrice || (pb.soldPrice ? String(pb.soldPrice) : '');
+        return `
+        <div class="match-row"${b ? ` onclick="openBuyer('${b.id}')" style="cursor:pointer;"` : ''}>
+          <div class="match-info">
+            <div class="n">${esc(nm)}</div>
+            <div class="w">${addr ? '📍 ' + esc(addr) : ''}${addr && price ? ' · ' : ''}${price ? '💰 ' + esc(price) : ''}${!addr && !price ? '—' : ''}</div>
+          </div>
+          ${b && b.phone ? `<a class="call-link match-call" href="tel:${digitsOnly(b.phone)}" onclick="event.stopPropagation()">📞</a>` : `<span style="font-size:12px;color:#5c6b82;">${b ? 'no phone' : ''}</span>`}
+        </div>`;
+      }).join('') : '<div class="timeline-empty">No pulled buyers linked yet — link them from 🔍 Find Buyers.</div>'}
     </div>
 
     <div class="detail-card">
@@ -1129,15 +1159,24 @@ async function submitPublicOffer(dealId) {
   }
 }
 
-/* ================= Find Buyers (InvestorBase-style search) =================
-   DISPO MANAGER handoff contract:
-   - Luca submits a search here → doc in `dispoBuyerSearches` with status 'requested'.
-   - DISPO MANAGER reads the queue, researches per Luca's buyer-finding instructions
-     (county-records cash purchases within radius + monthsBack of the subject),
-     and writes each found buyer purchase to `dispoBuyerSearchResults`:
-     { searchId, buyerName, purchaseAddress, soldPrice, soldDate, lat, lng, buyerId? }
+/* ================= Find Buyers (InvestorBase search) =================
+   DISPO MANAGER handoff contract (InvestorBase is the ONLY buyer source):
+   - Luca queues a search here → doc in `dispoBuyerSearches`:
+     { address, propertyType, radiusMiles, monthsBack: 12 (hardcoded), notes,
+       status: 'queued', lat, lng, createdAt }
+     Lookback never exceeds 12 months — no user control.
+   - DISPO MANAGER runs the InvestorBase pull per SOP (skip-trace-and-save before
+     search, buyer-type filters matched to propertyType, radius from 0.5 mi
+     expanding until ≥10 buyers, no cap), creates/updates `dispoBuyers` docs
+     (with firstName/lastName + boughtPropertyAddress/Price/Details), and links
+     each buyer to the search AND the deal via `dispoBuyerSearchResults`:
+     { searchId, dealId, buyerId, createdAt }
+     (legacy purchase fields buyerName/purchaseAddress/soldPrice/soldDate/lat/lng
+     may also be present on result docs for the map — rendered defensively).
    - She flips the search status to 'complete' when done.
-   - From the app, any result can be pushed into the Buyers DB via "Add to Buyers". */
+   - In-app: "🔗 Link buyers to deal" on a search links all its pushed buyers at
+     once; per-result "🔗 Deal" links one; buyer card "🔗 Link to Deal" links a
+     buyer directly. Deal detail shows them under "🔗 Pulled Buyers". */
 async function geocodeAddress(addr) {
   try {
     const url = 'https://nominatim.openstreetmap.org/search?format=json&limit=1&q=' + encodeURIComponent(addr);
@@ -1166,14 +1205,15 @@ async function renderBuyerSearch() {
         <input id="bs-address" placeholder="123 Main St, Thomaston, GA 30286" style="width:100%;padding:13px 12px;border-radius:10px;border:1px solid #22385a;background:#0b1626;color:#e9edf3;font-size:16px;">
       </div>
       <div class="form-grid">
-        <div class="form-field"><label>Search radius</label><select id="bs-radius">
-          <option value="0.5">0.5 mile</option><option value="1" selected>1 mile</option>
-          <option value="2">2 miles</option><option value="3">3 miles</option><option value="5">5 miles</option>
+        <div class="form-field"><label>Property type *</label><select id="bs-ptype">
+          <option value="">Select…</option>
+          <option>Single Family</option><option>Duplex</option><option>Triplex</option><option>Quad</option>
+          <option>Multi-Family</option><option>Condo</option><option>Mobile Home</option><option>Townhome</option>
+          <option>Land</option><option>Commercial</option><option>Other</option>
         </select></div>
-        <div class="form-field"><label>Cash purchases within</label><select id="bs-months">
-          <option value="6">Last 6 months</option><option value="12" selected>Last 12 months</option>
-        </select></div>
+        <div class="form-field"><label>Radius (miles)</label><input type="number" id="bs-radius" value="0.5" min="0.1" step="0.1" inputmode="decimal"></div>
       </div>
+      <div class="addr-sub" style="margin-top:6px;">🕐 Cash purchases within the last 12 months — fixed per SOP.</div>
       <div class="form-field" style="margin-top:10px;"><label>Notes for DISPO MANAGER</label>
         <textarea id="bs-notes" placeholder="Anything specific about this search…" style="width:100%;padding:12px;border-radius:10px;border:1px solid #22385a;background:#0b1626;color:#e9edf3;font-size:15px;min-height:56px;"></textarea>
       </div>
@@ -1190,10 +1230,14 @@ async function renderBuyerSearch() {
               : '<span class="status-badge" style="color:#e8c476;border-color:#e8c476;background:#e8c47618;">⏳ Searching</span>'}
           </div>
           <div class="buyer-stats">
+            <span>🏷️ ${esc(s.propertyType || '—')}</span>
             <span>📍 ${esc(s.radiusMiles)} mi radius</span>
-            <span>🕐 Last ${esc(s.monthsBack)} mo</span>
+            <span>🕐 Last ${esc(s.monthsBack != null ? s.monthsBack : 12)} mo</span>
             <span>📅 ${esc(fmtDate((s.createdAt || '').slice(0, 10)))}</span>
             <span>🎯 <b data-rcount="${s.id}">…</b> buyers found</span>
+          </div>
+          <div style="margin-top:10px;" onclick="event.stopPropagation();">
+            <button class="btn-ghost" style="padding:8px 12px;min-height:0;" onclick="linkSearchToDeal('${s.id}')">🔗 Link buyers to deal</button>
           </div>
         </div>`).join('') : '<div class="timeline-empty">No searches yet — run your first one above.</div>'}
     </div>`;
@@ -1205,20 +1249,21 @@ async function renderBuyerSearch() {
 }
 async function submitBuyerSearch() {
   const address = ($('bs-address').value || '').trim();
+  const propertyType = ($('bs-ptype').value || '').trim();
   if (!address) { showToast('Enter a property address'); return; }
-  const radiusMiles = +$('bs-radius').value;
-  const monthsBack = +$('bs-months').value;
+  if (!propertyType) { showToast('Select a property type'); return; }
+  const radiusMiles = parseFloat($('bs-radius').value) || 0.5;
   const notes = ($('bs-notes').value || '').trim();
   showToast('Locating property…');
   const geo = await geocodeAddress(address + ', USA');
   const rec = {
-    address, radiusMiles, monthsBack, notes,
-    status: 'requested',
+    address, propertyType, radiusMiles, monthsBack: 12, notes,
+    status: 'queued',
     lat: geo ? geo.lat : '', lng: geo ? geo.lng : '',
     createdAt: new Date().toISOString()
   };
   const ref = await db.collection('dispoBuyerSearches').add(rec);
-  showToast('Search requested — DISPO MANAGER is on it');
+  showToast('Search queued — DISPO MANAGER is on it');
   openBuyerSearch(ref.id);
 }
 async function openBuyerSearch(id) {
@@ -1235,7 +1280,7 @@ async function openBuyerSearch(id) {
       <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap;">
         <div>
           <h2 style="font-size:19px;">${esc(s.address)}</h2>
-          <div class="addr-sub">📍 ${esc(s.radiusMiles)} mi radius · 🕐 cash buys, last ${esc(s.monthsBack)} months · ${esc(fmtDate((s.createdAt || '').slice(0, 10)))}</div>
+          <div class="addr-sub">🏷️ ${esc(s.propertyType || '—')} · 📍 ${esc(s.radiusMiles)} mi radius · 🕐 cash buys, last ${esc(s.monthsBack != null ? s.monthsBack : 12)} months · ${esc(fmtDate((s.createdAt || '').slice(0, 10)))}</div>
         </div>
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
           ${s.status === 'complete'
@@ -1258,7 +1303,7 @@ async function openBuyerSearch(id) {
               <div class="w">💰 ${money(r.soldPrice)} · ${esc(fmtDate(r.soldDate))} · 📍 ${esc(r.purchaseAddress || '')}</div>
             </div>
             ${r.buyerId
-              ? '<span style="font-size:12px;color:#4caf82;">✓ In Buyers DB</span>'
+              ? `<span style="display:flex;gap:8px;align-items:center;flex-shrink:0;"><span style="font-size:12px;color:#4caf82;">✓ In Buyers DB</span><button class="btn-ghost" style="padding:8px 12px;min-height:0;" onclick="linkResultToDeal('${r.id}')">${r.dealId ? '🔗 Deal ✓' : '🔗 Deal'}</button></span>`
               : `<button class="btn-ghost" style="padding:8px 12px;min-height:0;flex-shrink:0;" onclick="pushResultToBuyers('${r.id}')">+ Add to Buyers</button>`}
           </div>`).join('') : '<div class="timeline-empty">No buyers logged yet — DISPO MANAGER adds them here as the research comes in.</div>'}
       </div>
@@ -1341,10 +1386,18 @@ async function pushResultToBuyers(resultId) {  const doc = await db.collection('
   const r = doc.data();
   // Avoid dupes: match by name
   const existing = buyers.find(b => String(b.name || '').toLowerCase() === String(r.buyerName || '').toLowerCase());
+  const nameParts = String(r.buyerName || '').trim().split(/\s+/).filter(Boolean);
+  const boughtFields = {
+    firstName: nameParts[0] || '', lastName: nameParts.slice(1).join(' ') || '',
+    boughtPropertyAddress: r.purchaseAddress || '',
+    boughtPropertyPrice: r.soldPrice ? String(r.soldPrice) : '',
+    boughtPropertyDetails: [r.soldDate ? 'Sold ' + fmtDate(r.soldDate) : '', r.purchaseAddress ? 'Cash purchase' : ''].filter(Boolean).join(' · ')
+  };
   let buyerId;
   if (existing) {
     buyerId = existing.id;
     await db.collection('dispoBuyers').doc(buyerId).set({
+      ...boughtFields,
       sourceDetail: ((existing.sourceDetail || '') + ` | Buyer search: ${r.purchaseAddress} ${money(r.soldPrice)} (${fmtDate(r.soldDate)})`).trim(),
       updatedAt: new Date().toISOString()
     }, { merge: true });
@@ -1355,7 +1408,7 @@ async function pushResultToBuyers(resultId) {  const doc = await db.collection('
       buyBox: '', source: 'Buyer Search', sourceDetail: `${r.purchaseAddress} — cash ${money(r.soldPrice)} (${fmtDate(r.soldDate)})`,
       cashBuys12mo: '1', dateAdded: new Date().toISOString().slice(0, 10),
       lastVerified: new Date().toISOString().slice(0, 10),
-      notes: '', status: 'active', updatedAt: new Date().toISOString()
+      notes: '', status: 'active', ...boughtFields, updatedAt: new Date().toISOString()
     });
     buyerId = ref.id;
   }
@@ -1364,6 +1417,53 @@ async function pushResultToBuyers(resultId) {  const doc = await db.collection('
   await loadAll();
   const sdoc = await db.collection('dispoBuyerSearches').doc(r.searchId).get();
   if (sdoc.exists) openBuyerSearch(r.searchId);
+}
+
+/* ================= Link buyers ↔ deals via dispoBuyerSearchResults =================
+   Result doc links a buyer to a search and/or a deal:
+   { searchId, dealId, buyerId, createdAt } (+ legacy purchase fields
+   buyerName/purchaseAddress/soldPrice/soldDate/lat/lng kept for the map). */
+function pickDeal(title, cb) {
+  const ov = document.createElement('div');
+  ov.style.cssText = 'position:fixed;inset:0;z-index:999;background:rgba(0,0,0,.6);display:flex;align-items:flex-end;justify-content:center;';
+  ov.innerHTML = `<div style="background:#10233d;border:1px solid #22385a;border-radius:16px 16px 0 0;width:100%;max-width:560px;max-height:70vh;overflow:auto;padding:18px;">
+    <h3 style="margin:0 0 4px;font-size:17px;">${esc(title)}</h3>
+    <div class="addr-sub" style="margin-bottom:12px;">Pick the deal to attach to.</div>
+    ${deals.length ? deals.map(d => `<button class="btn-ghost" style="width:100%;text-align:left;margin-bottom:8px;" data-dealpick="${d.id}">📍 ${esc(d.address || 'Untitled deal')}${d.city ? '<span style="color:#8a97a8;"> · ' + esc(d.city) + '</span>' : ''}</button>`).join('') : '<div class="timeline-empty">No deals yet.</div>'}
+    <button class="btn-ghost" style="width:100%;margin-top:4px;" id="deal-picker-cancel">Cancel</button>
+  </div>`;
+  document.body.appendChild(ov);
+  ov.querySelector('#deal-picker-cancel').onclick = () => ov.remove();
+  ov.onclick = e => { if (e.target === ov) ov.remove(); };
+  ov.querySelectorAll('[data-dealpick]').forEach(b => b.onclick = () => { const id = b.getAttribute('data-dealpick'); ov.remove(); cb(id); });
+}
+async function linkResultToDeal(resultId) {
+  pickDeal('Link buyer to deal', async (dealId) => {
+    await db.collection('dispoBuyerSearchResults').doc(resultId).set({ dealId, updatedAt: new Date().toISOString() }, { merge: true });
+    showToast('Buyer linked to deal');
+    const doc = await db.collection('dispoBuyerSearchResults').doc(resultId).get();
+    if (doc.exists && doc.data().searchId) openBuyerSearch(doc.data().searchId);
+  });
+}
+async function linkSearchToDeal(searchId) {
+  pickDeal('Link search buyers to deal', async (dealId) => {
+    const rsnap = await db.collection('dispoBuyerSearchResults').where('searchId', '==', searchId).get();
+    let n = 0;
+    for (const doc of rsnap.docs) {
+      if (doc.data().buyerId) {
+        await db.collection('dispoBuyerSearchResults').doc(doc.id).set({ dealId, updatedAt: new Date().toISOString() }, { merge: true });
+        n++;
+      }
+    }
+    showToast(n ? n + ' buyer' + (n === 1 ? '' : 's') + ' linked to deal' : 'No pushed buyers on this search yet');
+    openBuyerSearch(searchId);
+  });
+}
+async function linkBuyerToDeal(buyerId) {
+  pickDeal('Link buyer to deal', async (dealId) => {
+    await db.collection('dispoBuyerSearchResults').add({ searchId: '', dealId, buyerId, createdAt: new Date().toISOString() });
+    showToast('Buyer linked to deal');
+  });
 }
 
 /* ================= KPI dashboard ================= */
@@ -1557,6 +1657,14 @@ function showBuyerForm(buyerId) {
         ${fld('cashBuys12mo', 'Cash buys / 12mo', b.cashBuys12mo, 'number')}
       </div>
       <div class="form-field" style="margin-top:10px;"><label>Buy box description</label><textarea id="bf-buyBox" placeholder="e.g. Older in-town residential, rural parcels…">${esc(b.buyBox || '')}</textarea></div>
+      <div class="section-label">Bought Property (InvestorBase)</div>
+      <div class="form-grid">
+        ${fld('firstName', 'First name', b.firstName)}
+        ${fld('lastName', 'Last name', b.lastName)}
+        ${fld('boughtPropertyAddress', 'Bought property address', b.boughtPropertyAddress)}
+        ${fld('boughtPropertyPrice', 'Bought price', b.boughtPropertyPrice)}
+      </div>
+      <div class="form-field" style="margin-top:10px;"><label>Property details (beds / baths / sqft / year built…)</label><textarea id="bf-boughtPropertyDetails" placeholder="e.g. 3bd/2ba, 1,450 sqft, built 1987">${esc(b.boughtPropertyDetails || '')}</textarea></div>
       <div class="form-grid" style="margin-top:10px;">
         ${fld('source', 'Source', b.source)}
         ${fld('sourceDetail', 'Source detail', b.sourceDetail)}
@@ -1581,6 +1689,9 @@ async function saveBuyerForm(id) {
     name: v('name'), type: v('type'), phone: v('phone'), email: v('email'), mailingAddress: v('mailingAddress'),
     buyingCity: v('buyingCity'), buyingCounty: v('buyingCounty'), buyingZip: v('buyingZip'),
     cashBuys12mo: v('cashBuys12mo'), buyBox: $('bf-buyBox').value.trim(),
+    firstName: v('firstName'), lastName: v('lastName'),
+    boughtPropertyAddress: v('boughtPropertyAddress'), boughtPropertyPrice: v('boughtPropertyPrice'),
+    boughtPropertyDetails: ($('bf-boughtPropertyDetails') || {}).value?.trim() || '',
     source: v('source'), sourceDetail: v('sourceDetail'), lastVerified: v('lastVerified'),
     status: $('bf-status').value, notes: $('bf-notes').value.trim(),
     updatedAt: new Date().toISOString()
@@ -1626,13 +1737,21 @@ function openBuyer(id) {
         <div class="num-box"><div class="l">Cash buys / 12mo</div><div class="v">${esc(b.cashBuys12mo || '—')}</div></div>
         <div class="num-box"><div class="l">Territory</div><div class="v" style="font-size:14px;">${esc([b.buyingCity, b.buyingCounty, b.buyingZip].filter(Boolean).join(' · ') || '—')}</div></div>
       </div>
+      ${(b.boughtPropertyAddress || b.boughtPropertyPrice || b.boughtPropertyDetails || b.firstName || b.lastName) ? `
+      <div class="section-label">🏠 Bought Property (InvestorBase)</div>
+      <div style="font-size:14px;color:#aeb9c7;line-height:1.8;">
+        ${[b.firstName, b.lastName].filter(Boolean).join(' ') ? '👤 ' + esc([b.firstName, b.lastName].filter(Boolean).join(' ')) + '<br>' : ''}
+        ${b.boughtPropertyAddress ? '📍 ' + esc(b.boughtPropertyAddress) + '<br>' : ''}
+        ${b.boughtPropertyPrice ? '💰 ' + esc(b.boughtPropertyPrice) + '<br>' : ''}
+        ${b.boughtPropertyDetails ? esc(b.boughtPropertyDetails) : ''}
+      </div>` : ''}
       <div class="section-label">Provenance</div>
       <div style="font-size:13px;color:#8a97a8;line-height:1.7;">
         Source: ${esc(b.source || '—')}${b.sourceDetail ? '<br>' + esc(b.sourceDetail) : ''}<br>
         Added: ${esc(fmtDate(b.dateAdded))} · Verified: ${esc(fmtDate(b.lastVerified))}
       </div>
       ${b.notes ? `<div class="section-label">Notes</div><div style="font-size:14px;color:#aeb9c7;line-height:1.6;white-space:pre-wrap;">${esc(b.notes)}</div>` : ''}
-      <div style="margin-top:18px;"><button class="btn-ghost" onclick='showBuyerForm(${JSON.stringify(b.id)})'>✏️ Edit Buyer</button></div>
+      <div style="margin-top:18px;display:flex;gap:10px;flex-wrap:wrap;"><button class="btn-ghost" onclick='showBuyerForm(${JSON.stringify(b.id)})'>✏️ Edit Buyer</button><button class="btn-ghost" onclick="linkBuyerToDeal('${b.id}')">🔗 Link to Deal</button></div>
     </div>
     <div class="detail-card">
       <h2 style="font-size:18px;">📦 Matching Deals <span style="color:#8a97a8;font-size:13px;font-weight:400;">(${matched.length})</span></h2>
