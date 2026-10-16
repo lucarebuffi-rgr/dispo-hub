@@ -310,6 +310,15 @@ function money(n) {
   if (n === '' || n == null || isNaN(+n)) return '—';
   return '$' + (+n).toLocaleString('en-US', { maximumFractionDigits: 0 });
 }
+// Sort-safe string for Firestore date fields: handles Timestamp objects, ISO strings, or missing values.
+// (A bare .localeCompare on a Timestamp throws — that silently emptied the buyer sections once.)
+function tsStr(v) {
+  if (!v) return '';
+  if (typeof v === 'string') return v;
+  try { if (v.toDate) return v.toDate().toISOString(); } catch (e) {}
+  if (v.seconds != null) return new Date(v.seconds * 1000).toISOString();
+  return String(v);
+}
 function fmtDate(iso) {
   if (!iso) return '—';
   // Bare YYYY-MM-DD dates parse as UTC midnight → noon local avoids day-shift in US timezones
@@ -376,7 +385,7 @@ async function logActivity(dealId, text) {
 }
 async function getActivity(dealId) {
   const snap = await db.collection('dispoActivity').where('dealId', '==', dealId).get();
-  return snap.docs.map(d => d.data()).sort((a, b) => (b.at || '').localeCompare(a.at || ''));
+  return snap.docs.map(d => d.data()).sort((a, b) => tsStr(b.at).localeCompare(tsStr(a.at)));
 }
 
 /* ================= Buyer Match Engine (SmartMatch-style) =================
@@ -726,8 +735,8 @@ async function openDeal(id) {
       const r = { id: doc.id, ...doc.data() };
       r._buyer = r.buyerId ? (buyers.find(b => b.id === r.buyerId) || null) : null;
       return r;
-    }).sort((a, b) => (a.createdAt || '').localeCompare(b.createdAt || '')); // InvestorBase rank order: best match first
-  } catch (e) { pulledBuyers = []; }
+    }).sort((a, b) => tsStr(a.createdAt).localeCompare(tsStr(b.createdAt))); // InvestorBase rank order: best match first
+  } catch (e) { console.error('pulled buyers query failed', e); pulledBuyers = []; }
   const topRanked = pulledBuyers.filter(r => r.smartMatch === true);
   const otherPulled = pulledBuyers.filter(r => r.smartMatch !== true);
   const activity = await getActivity(id);
@@ -1284,7 +1293,7 @@ async function renderBuyerSearch() {
   try {
     const snap = await db.collection('dispoBuyerSearches').get();
     searches = snap.docs.map(d => ({ id: d.id, ...d.data() }))
-      .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+      .sort((a, b) => tsStr(b.createdAt).localeCompare(tsStr(a.createdAt)));
   } catch (e) {
     $('content').innerHTML = '<div class="empty-state">⚠️ Search collections not ready yet — updating database rules, try again in a minute.</div>';
     return;
@@ -1798,7 +1807,7 @@ async function renderKPIs() {
       </div>`;
     }).join('')}
     <div class="section-label">Recent offers</div>
-    ${offers.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')).slice(0, 10).map(o => {
+    ${offers.sort((a, b) => tsStr(b.createdAt).localeCompare(tsStr(a.createdAt))).slice(0, 10).map(o => {
       const d = deals.find(x => x.id === o.dealId);
       return `<div class="match-row"><div class="match-info">
         <div class="n">${money(o.amount)} <span style="font-weight:400;color:#8a97a8;">— ${esc(o.buyerName || '')}</span></div>
@@ -1817,7 +1826,7 @@ async function startDialer(dealId) {
   try {
     const psnap = await db.collection('dispoBuyerSearchResults').where('dealId', '==', dealId).get();
     queue = psnap.docs.map(doc => ({ id: doc.id, ...doc.data() }))
-      .sort((a, b) => (a.createdAt || '').localeCompare(b.createdAt || '')) // InvestorBase rank order
+      .sort((a, b) => tsStr(a.createdAt).localeCompare(tsStr(b.createdAt))) // InvestorBase rank order
       .filter(r => r.smartMatch === true) // Top Ranked: InvestorBase Smart Match only
       .map(r => {
         const b = r.buyerId ? (buyers.find(x => x.id === r.buyerId) || null) : null;
