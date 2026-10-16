@@ -726,7 +726,7 @@ async function openDeal(id) {
       const r = { id: doc.id, ...doc.data() };
       r._buyer = r.buyerId ? (buyers.find(b => b.id === r.buyerId) || null) : null;
       return r;
-    }).sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+    }).sort((a, b) => (a.createdAt || '').localeCompare(b.createdAt || '')); // InvestorBase rank order: best match first
   } catch (e) { pulledBuyers = []; }
   const activity = await getActivity(id);
   const compsSnap = await db.collection('dispoComps').where('dealId', '==', id).get();
@@ -799,10 +799,10 @@ async function openDeal(id) {
     </div>
 
     <div class="detail-card">
-      <h2 style="font-size:18px;">🔗 Pulled Buyers <span style="color:#8a97a8;font-size:13px;font-weight:400;">(${pulledBuyers.length})</span></h2>
-      <div class="addr-sub">Cash buyers pulled from InvestorBase for this deal.</div>
+      <h2 style="font-size:18px;">⭐ Priority Buyers <span style="color:#8a97a8;font-size:13px;font-weight:400;">(${pulledBuyers.length})</span></h2>
+      <div class="addr-sub">InvestorBase pulls for this deal — best matches first.</div>
       ${pulledBuyers.length ? `<button class="btn-gold" style="width:100%;min-height:52px;margin-bottom:12px;" onclick="startDialer('${id}')">📞 Start Call Session (${pulledBuyers.length} buyers)</button>` : ''}
-      ${pulledBuyers.length ? pulledBuyers.map(pb => {
+      ${pulledBuyers.length ? pulledBuyers.map((pb, i) => {
         const b = pb._buyer;
         const nm = (b && b.name) || pb.buyerName || 'Unknown buyer';
         const person = b ? [b.firstName, b.lastName].filter(Boolean).join(' ') : '';
@@ -811,7 +811,7 @@ async function openDeal(id) {
         return `
         <div class="match-row"${b ? ` onclick="openBuyer('${b.id}')" style="cursor:pointer;"` : ''}>
           <div class="match-info">
-            <div class="n">${esc(nm)}</div>
+            <div class="n">${esc(nm)}${i < 3 ? ' <span style="color:#d4a843;font-size:12px;font-weight:700;">★ Best match</span>' : ''}</div>
             ${person ? `<div class="w" style="color:#e8c476;">👤 ${esc(person)}</div>` : ''}
             <div class="w">${addr ? '📍 ' + esc(addr) : ''}${addr && price ? ' · ' : ''}${price ? '💰 ' + esc(price) : ''}${!addr && !price ? '—' : ''}</div>
           </div>
@@ -1216,7 +1216,7 @@ async function submitPublicOffer(dealId) {
    - She flips the search status to 'complete' when done.
    - In-app: "🔗 Link buyers to deal" on a search links all its pushed buyers at
      once; per-result "🔗 Deal" links one; buyer card "🔗 Link to Deal" links a
-     buyer directly. Deal detail shows them under "🔗 Pulled Buyers". */
+     buyer directly. Deal detail shows them under "⭐ Priority Buyers" (InvestorBase rank order). */
 const PTYPE_OPTIONS = ['Single Family','Duplex','Triplex','Quad','Multi-Family','Condo','Mobile Home','Townhome','Land','Commercial','Other'];
 // Multi-select property-type chips (gold = selected)
 function ptypeChipsHTML(containerId, selected) {
@@ -1793,16 +1793,17 @@ async function startDialer(dealId) {
   let queue = [];
   try {
     const psnap = await db.collection('dispoBuyerSearchResults').where('dealId', '==', dealId).get();
-    queue = psnap.docs.map(doc => {
-      const r = doc.data();
-      const b = r.buyerId ? (buyers.find(x => x.id === r.buyerId) || null) : null;
-      if (!b) return null;
-      const why = ['Pulled from InvestorBase'];
-      const baddr = b.boughtPropertyAddress || r.boughtPropertyAddress || r.purchaseAddress || '';
-      const bprice = b.boughtPropertyPrice || r.boughtPropertyPrice || (r.soldPrice ? String(r.soldPrice) : '');
-      if (baddr || bprice) why.push('🏠 Bought: ' + baddr + (baddr && bprice ? ' for ' : '') + bprice);
-      return { buyer: b, score: '', why };
-    }).filter(Boolean);
+    queue = psnap.docs.map(doc => ({ id: doc.id, ...doc.data() }))
+      .sort((a, b) => (a.createdAt || '').localeCompare(b.createdAt || '')) // InvestorBase rank order
+      .map((r, i) => {
+        const b = r.buyerId ? (buyers.find(x => x.id === r.buyerId) || null) : null;
+        if (!b) return null;
+        const why = [i < 3 ? '★ Best match' : 'Pulled from InvestorBase'];
+        const baddr = b.boughtPropertyAddress || r.boughtPropertyAddress || r.purchaseAddress || '';
+        const bprice = b.boughtPropertyPrice || r.boughtPropertyPrice || (r.soldPrice ? String(r.soldPrice) : '');
+        if (baddr || bprice) why.push('🏠 Bought: ' + baddr + (baddr && bprice ? ' for ' : '') + bprice);
+        return { buyer: b, score: '', why };
+      }).filter(Boolean);
   } catch (e) { queue = []; }
   if (!queue.length) { showToast('No pulled buyers to call yet'); return; }
   dialer = { dealId, queue, idx: 0, outcomes: {} };
