@@ -387,7 +387,7 @@ function buyerZips(b) {
   return String(b.buyingZip || '').split(/[,;\s]+/).map(z => z.trim()).filter(Boolean);
 }
 function buyerCounties(b) {
-  return String(b.buyingCounty || '').split(/[,;]+/).map(c => c.trim().toLowerCase()).filter(Boolean);
+  return String(b.buyingCounty || '').split(/[,;/]+/).map(c => c.trim().toLowerCase()).filter(Boolean);
 }
 function matchScore(deal, buyer) {
   if (buyer.status === 'inactive') return { score: 0, why: [] };
@@ -395,18 +395,22 @@ function matchScore(deal, buyer) {
   const why = [];
   const dz = String(deal.zip || '').trim();
   const dc = String(deal.county || '').trim().toLowerCase();
+  // Geographic overlap is required — a buyer with no ZIP/county/city match
+  // never qualifies, no matter their track record (Luca, 2026-10-16).
+  let geo = false;
   // ZIP match — strongest signal
-  if (dz && buyerZips(buyer).includes(dz)) { score += 40; why.push('Same ZIP'); }
+  if (dz && buyerZips(buyer).includes(dz)) { score += 40; why.push('Same ZIP'); geo = true; }
   // County match
-  if (dc && buyerCounties(buyer).includes(dc)) { score += 25; why.push('Same county'); }
+  if (dc && buyerCounties(buyer).includes(dc)) { score += 25; why.push('Same county'); geo = true; }
   // City match
   const dCity = String(deal.city || '').trim().toLowerCase();
-  if (dCity && String(buyer.buyingCity || '').toLowerCase().includes(dCity)) { score += 15; why.push('Same city'); }
+  if (dCity && String(buyer.buyingCity || '').toLowerCase().includes(dCity)) { score += 15; why.push('Same city'); geo = true; }
+  if (!geo) return { score: 0, why: [] };
   // Buy box keyword overlap (property type / deal flavor)
   const box = String(buyer.buyBox || '').toLowerCase();
   const dealText = `${deal.propertyType || ''} ${deal.notes || ''}`.toLowerCase();
   const keywords = ['rental', 'flip', 'duplex', 'multi', 'land', 'rural', 'residential', 'commercial', 'fixer', 'turnkey'];
-  const hits = keywords.filter(k => box.includes(k) && (dealText.includes(k) || k === 'residential'));
+  const hits = keywords.filter(k => box.includes(k) && dealText.includes(k));
   if (hits.length) { score += Math.min(10, hits.length * 5); why.push('Buy box: ' + hits.slice(0, 2).join(', ')); }
   // Track record — cash buys in last 12 months
   const cb = +buyer.cashBuys12mo || 0;
