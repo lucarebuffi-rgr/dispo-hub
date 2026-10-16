@@ -486,7 +486,7 @@ function renderDeals() {
 function renderBuyers() {
   const q = buyerSearch.toLowerCase();
   const list = buyers.filter(b =>
-    !q || [b.name, b.buyingCity, b.buyingCounty, b.buyingZip, b.buyBox, b.phone].join(' ').toLowerCase().includes(q)
+    !q || [b.name, b.firstName, b.lastName, b.buyingCity, b.buyingCounty, b.buyingZip, b.buyBox, b.phone, b.boughtPropertyAddress].join(' ').toLowerCase().includes(q)
   );
   $('buyers-pill').textContent = buyers.length;
   let html = `<div class="toolbar">
@@ -497,25 +497,28 @@ function renderBuyers() {
   if (!list.length) {
     html += `<div class="empty-state">${buyers.length ? 'No buyers match that search.' : 'No buyers yet — import from your sheet or add one manually.'}</div>`;
   } else {
-    html += list.map(b => `
+    html += list.map(b => {
+      const personName = [b.firstName, b.lastName].filter(Boolean).join(' ');
+      return `
       <div class="buyer-card" onclick="openBuyer('${b.id}')">
         <div class="buyer-top">
-          <span class="buyer-name">${esc(b.name)}</span>
+          <span class="buyer-name">${esc(personName || b.name)}</span>
           <span class="buyer-type ${b.type === 'LLC' ? 'llc' : ''}">${esc(b.type || '—')}</span>
           ${b.status === 'inactive' ? '<span class="inactive-tag">Inactive</span>' : ''}
         </div>
+        ${personName && b.name && personName !== b.name ? `<div style="font-size:12px;color:#8a97a8;margin:-4px 0 8px;">${esc(b.name)}</div>` : ''}
         <div class="buyer-contact">
           ${b.phone ? `<a class="call-link" href="tel:${digitsOnly(b.phone)}" onclick="event.stopPropagation()">📞 ${esc(formatPhone(b.phone))}</a>` : '<span style="color:#5c6b82;font-size:13px;">No phone — needs skip trace</span>'}
           ${b.email ? `<span style="font-size:13px;color:#aeb9c7;">✉️ ${esc(b.email)}</span>` : ''}
         </div>
         <div class="buyer-buybox">🎯 ${esc(b.buyBox || 'No buy box recorded')}</div>
-        ${b.boughtPropertyAddress ? `<div class="buyer-buybox">🏠 Bought: ${esc(b.boughtPropertyAddress)}${b.boughtPropertyPrice ? ' · ' + esc(b.boughtPropertyPrice) : ''}</div>` : ''}
+        ${(b.boughtPropertyAddress || b.boughtPropertyPrice || b.boughtPropertyDetails) ? `<div class="buyer-buybox">🏠 Bought: ${esc(b.boughtPropertyAddress || '—')}${b.boughtPropertyPrice ? ' · ' + esc(b.boughtPropertyPrice) : ''}${b.boughtPropertyDetails ? `<div style="font-size:12px;color:#8a97a8;margin-top:2px;">${esc(b.boughtPropertyDetails)}</div>` : ''}</div>` : ''}
         <div class="buyer-stats">
           ${b.cashBuys12mo ? `<span>💰 <b>${esc(b.cashBuys12mo)}</b> cash buys / 12mo</span>` : ''}
           ${b.buyingCity || b.buyingCounty ? `<span>📍 ${esc([b.buyingCity, b.buyingCounty].filter(Boolean).join(', '))}</span>` : ''}
           ${b.lastVerified ? `<span>✔️ Verified ${esc(fmtDate(b.lastVerified))}</span>` : ''}
         </div>
-      </div>`).join('');
+      </div>`; }).join('');
   }
   $('content').innerHTML = html;
   const si = $('buyer-search');
