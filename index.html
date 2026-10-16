@@ -1620,36 +1620,19 @@ async function initDealBuyerMap(deal, pulledBuyers) {
       if (lat && lng) pins.push({ pb, lat: +lat, lng: +lng });
       else toLocate.push(pb);
     });
-    if (toLocate.length) setStatus('Locating ' + toLocate.length + ' buyer' + (toLocate.length === 1 ? '' : 's') + ' on map…');
-    for (const pb of toLocate) {
-      const b = pb._buyer;
-      const addr = (b && b.boughtPropertyAddress) || pb.boughtPropertyAddress || pb.purchaseAddress || '';
-      if (addr) {
-        let geo = null;
-        try { geo = await geocodeAddress(addr + ', USA'); } catch (e) {}
-        try { await new Promise(r => setTimeout(r, 1100)); } catch (e) {}
-        if (geo && geo.lat && geo.lng) {
-          pins.push({ pb, lat: +geo.lat, lng: +geo.lng });
-          if (b && b.id) {
-            try {
-              await db.collection('dispoBuyers').doc(b.id).set({ buyerLat: +geo.lat, buyerLng: +geo.lng }, { merge: true });
-              b.buyerLat = +geo.lat; b.buyerLng = +geo.lng;
-            } catch (e) {}
-          }
-        }
-      }
-    }
-    setStatus(pins.length ? '' : 'Could not locate any buyer addresses on the map.');
-    if (countEl) countEl.textContent = '(' + pins.length + ')';
-    if (!dealGeo && !pins.length) {
+    if (!dealGeo && !pins.length && !toLocate.length) {
       mapEl.innerHTML = '<div class="timeline-empty">No mappable locations yet.</div>';
       return;
     }
+    // Draw the map NOW with the subject + already-located buyers; the rest
+    // resolve in the background (1 lookup/sec rate limit) and drop in as they land.
     const map = L.map('deal-buyer-map').setView(
-      dealGeo ? [dealGeo.lat, dealGeo.lng] : [pins[0].lat, pins[0].lng], 11);
+      dealGeo ? [dealGeo.lat, dealGeo.lng] : (pins.length ? [pins[0].lat, pins[0].lng] : [33.749, -84.388]), 11);
     window._dealBuyerMap = map;
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(map);
     const pts = [];
+    let buyerPinCount = 0;
+    const paintCount = () => { if (countEl) countEl.textContent = '(' + buyerPinCount + ')'; };
     if (dealGeo) {
       pts.push([dealGeo.lat, dealGeo.lng]);
       const subjectIcon = L.divIcon({
@@ -1661,20 +1644,57 @@ async function initDealBuyerMap(deal, pulledBuyers) {
       L.marker([dealGeo.lat, dealGeo.lng], { icon: subjectIcon, zIndexOffset: 1000 }).addTo(map)
         .bindPopup('<b>🏠 Deal (subject)</b><br>' + esc(deal.address || ''));
     }
-    pins.forEach(({ pb, lat, lng }) => {
+    const addBuyerPin = (pb, lat, lng) => {
       const b = pb._buyer;
       const nm = (b && (b.firstName || b.lastName) ? [b.firstName, b.lastName].filter(Boolean).join(' ') : (b && b.name)) || pb.buyerName || 'Unknown buyer';
       const addr = (b && b.boughtPropertyAddress) || pb.boughtPropertyAddress || pb.purchaseAddress || '';
       const price = (b && b.boughtPropertyPrice) || pb.boughtPropertyPrice || (pb.soldPrice ? String(pb.soldPrice) : '');
       pts.push([lat, lng]);
+      buyerPinCount++;
       const popup = '<b>' + esc(nm) + '</b>'
-        + (b && b.phone ? '<br>📞 <a href="tel:' + digitsOnly(b.phone) + '" style="color:#1a6fd4;font-weight:700;">' + esc(formatPhone(b.phone)) + '</a>' : '')
-        + (addr ? '<br>📍 ' + esc(addr) : '')
-        + (price ? '<br>💰 ' + esc(price) : '');
+        + (b && b.phone ? '<br>\uD83D\uDCDE <a href="tel:' + digitsOnly(b.phone) + '" style="color:#1a6fd4;font-weight:700;">' + esc(formatPhone(b.phone)) + '</a>' : '')
+        + (addr ? '<br>\uD83D\uDCCD ' + esc(addr) : '')
+        + (price ? '<br>\uD83D\uDCB0 ' + esc(price) : '');
       L.marker([lat, lng], { icon: buyerDotIcon(buyerPinColor(b && b.type)) }).addTo(map).bindPopup(popup);
-    });
+    };
+    pins.forEach(({ pb, lat, lng }) => addBuyerPin(pb, lat, lng));
+    paintCount();
     if (pts.length > 1) map.fitBounds(pts, { padding: [30, 30] });
     setTimeout(() => map.invalidateSize(), 300);
+    // Background: resolve the remaining buyers without blocking the map.
+    // Nominatim allows 1 req/sec — each pin drops in as its lookup completes,
+    // and coords cache back to the buyer doc so next visit is instant.
+    if (toLocate.length) {
+      setStatus('Locating ' + toLocate.length + ' buyer' + (toLocate.length === 1 ? '' : 's') + ' on map…');
+      (async () => {
+        let added = 0;
+        for (const pb of toLocate) {
+          if (!window._dealBuyerMap) break; // user navigated away
+          const b = pb._buyer;
+          const addr = (b && b.boughtPropertyAddress) || pb.boughtPropertyAddress || pb.purchaseAddress || '';
+          if (addr) {
+            let geo = null;
+            try { geo = await geocodeAddress(addr + ', USA'); } catch (e) {}
+            try { await new Promise(r => setTimeout(r, 1100)); } catch (e) {}
+            if (geo && geo.lat && geo.lng) {
+              addBuyerPin(pb, +geo.lat, +geo.lng);
+              added++;
+              paintCount();
+              if (b && b.id) {
+                try {
+                  await db.collection('dispoBuyers').doc(b.id).set({ buyerLat: +geo.lat, buyerLng: +geo.lng }, { merge: true });
+                  b.buyerLat = +geo.lat; b.buyerLng = +geo.lng;
+                } catch (e) {}
+              }
+            }
+          }
+        }
+        if (added && window._dealBuyerMap) { try { map.fitBounds(pts, { padding: [30, 30] }); } catch (e) {} }
+        setStatus('');
+      })();
+    } else {
+      setStatus('');
+    }
   } catch (e) { console.error('deal buyer map failed', e); }
 }
 async function logSearchResult(searchId) {
