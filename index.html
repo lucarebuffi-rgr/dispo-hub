@@ -193,6 +193,35 @@
     .call-link { min-height: 48px; display: inline-flex; align-items: center; font-size: 17px; }
     .num-grid { grid-template-columns: 1fr 1fr; }
   }
+  /* ===== DispoHub Dialer (single-column: card top, notes + dispos below) ===== */
+  .dd-wrap { max-width: 560px; margin: 0 auto; }
+  .dd-top { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+  .dd-progress { flex: 1; text-align: center; color: #8a97a8; font-size: 14px; font-weight: 700; }
+  .dd-stats { text-align: center; color: #5c6b82; font-size: 12px; margin-bottom: 12px; line-height: 1.8; }
+  .dd-card { background: linear-gradient(180deg, #142a47, #0f2140); border: 1px solid #1e3554; border-radius: 18px; padding: 24px 20px; margin-bottom: 16px; }
+  .dd-day { display: inline-block; background: rgba(212,168,67,.14); color: #e8c476; font-size: 12px; font-weight: 700; padding: 4px 12px; border-radius: 12px; margin-bottom: 12px; }
+  .dd-name { font-size: 24px; font-weight: 800; color: #e9edf3; }
+  .dd-entity { color: #8a97a8; font-size: 13px; margin: 4px 0 12px; }
+  .dd-row { font-size: 14px; color: #aeb9c7; margin-bottom: 8px; line-height: 1.5; }
+  .dd-row b { color: #e9edf3; }
+  .dd-last { font-size: 12px; color: #8a97a8; margin-bottom: 4px; }
+  .dd-call { display: flex; align-items: center; justify-content: center; gap: 10px; background: linear-gradient(180deg, #e3b95c, #c9992f); color: #0d1b2e; font-size: 22px; font-weight: 800; border-radius: 16px; padding: 18px; text-decoration: none; margin: 14px 0 4px; box-shadow: 0 4px 18px rgba(212,168,67,.28); }
+  .dd-call:active { transform: scale(.98); }
+  .dd-notes { margin-top: 12px; }
+  .dd-notes textarea { width: 100%; background: rgba(18,37,64,.6); border: 1px solid #22385a; border-radius: 10px; padding: 12px; color: #e9edf3; font-family: inherit; font-size: 14px; resize: vertical; box-sizing: border-box; }
+  .dd-outcomes { margin-top: 18px; }
+  .dd-outcome-grid { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; }
+  .dd-outcome { flex: 1 1 30%; min-width: 140px; background: rgba(255,255,255,.03); border: 1px solid #2f4d78; color: #e9edf3; border-radius: 12px; padding: 15px 10px; font-size: 14px; font-weight: 600; cursor: pointer; font-family: inherit; min-height: 56px; }
+  .dd-outcome:active { background: rgba(212,168,67,.15); border-color: #d4a843; }
+  .dd-nav-row { display: flex; gap: 10px; margin: 0 0 14px; }
+  .dd-nav-btn { flex: 1; min-height: 52px; border-radius: 12px; font-size: 16px; font-weight: 700; background: rgba(18,37,64,.85); border: 1px solid #2f4d78; color: #9aa7ba; cursor: pointer; font-family: inherit; }
+  .dd-nav-btn:active { border-color: #d4a843; color: #e8c476; }
+  .dd-done { text-align: center; padding: 48px 20px; }
+  .dd-filter { display: flex; gap: 10px; margin-bottom: 14px; align-items: center; flex-wrap: wrap; }
+  .dd-filter select { flex: 1; min-width: 180px; background: #0d1b2e; color: #e9edf3; border: 1px solid #2f4d78; border-radius: 10px; padding: 12px; font-size: 15px; font-family: inherit; }
+  .dd-cadence { background: rgba(18,37,64,.6); border: 1px solid #1e3554; border-radius: 12px; padding: 14px 16px; margin-bottom: 16px; font-size: 13px; color: #8a97a8; line-height: 1.9; }
+  .dd-cadence b { color: #e8c476; }
+  .dd-paused-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; background: rgba(18,37,64,.5); border: 1px solid #22385a; border-radius: 10px; padding: 10px 14px; margin-bottom: 8px; font-size: 14px; color: #aeb9c7; }
 </style>
 </head>
 <body>
@@ -213,6 +242,7 @@
       <button class="tab-btn" data-tab="buyers">🤝 Buyers <span class="pill" id="buyers-pill">0</span></button>
       <button class="tab-btn" data-tab="find">🔍 Find Buyers</button>
       <button class="tab-btn" data-tab="kpis">📊 KPIs</button>
+      <button class="tab-btn" data-tab="dialer">📞 Dialer <span class="pill" id="dialer-pill">0</span></button>
     </div>
   </div>
 </div>
@@ -337,6 +367,9 @@ async function loadAll() {
   ]);
   deals = dSnap.docs.map(d => ({ id: d.id, ...d.data() }));
   buyers = bSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+  ddBooted = true;
+  const dp = document.getElementById('dialer-pill');
+  if (dp) dp.textContent = buyers.filter(ddCallable).length;
 }
 async function logActivity(dealId, text) {
   await db.collection('dispoActivity').add({ dealId, text, at: new Date().toISOString() });
@@ -547,6 +580,7 @@ function switchTab(t) {
   if (t === 'deals') renderDeals();
   else if (t === 'buyers') renderBuyers();
   else if (t === 'find') renderBuyerSearch();
+  else if (t === 'dialer') renderDialer();
   else renderKPIs();
 }
 document.querySelectorAll('.tab-btn').forEach(b => b.onclick = () => switchTab(b.dataset.tab));
@@ -1646,9 +1680,9 @@ function startDialer(dealId) {
   const queue = rankedBuyers(d);
   if (!queue.length) { showToast('No matched buyers to call'); return; }
   dialer = { dealId, queue, idx: 0, outcomes: {} };
-  renderDialer();
+  renderDealDialer();
 }
-function renderDialer() {
+function renderDealDialer() {
   const d = deals.find(x => x.id === dialer.dealId);
   const item = dialer.queue[dialer.idx];
   const b = item.buyer;
@@ -1724,7 +1758,7 @@ async function dialerNext() {
   document.getElementById('dispo-dialer').remove();
   if (dialer.idx < dialer.queue.length - 1) {
     dialer.idx++;
-    renderDialer();
+    renderDealDialer();
   } else {
     const n = Object.keys(dialer.outcomes).length;
     showToast(`Session done — ${n} buyer${n === 1 ? '' : 's'} logged`);
@@ -1736,7 +1770,7 @@ function dialerNav(dir) {
   persistDialerOutcome().then(() => {
     document.getElementById('dispo-dialer').remove();
     dialer.idx = Math.max(0, Math.min(dialer.queue.length - 1, dialer.idx + dir));
-    renderDialer();
+    renderDealDialer();
   });
 }
 function closeDialer() {
@@ -1884,6 +1918,257 @@ function openBuyer(id) {
   </div>`;
   window.scrollTo(0, 0);
 }
+
+/* ================= 📞 DispoHub Dialer =================
+   Buyer call dialer — same single-column format as the CRM dialers
+   (buyer card on top, Notes + disposition buttons below).
+   4-day cycle: D1 Double Dial+VM+SMS → D2 Double Dial+VM+SMS →
+   D3 rest (skip) → D4 Double Dial+VM+SMS (send deal) → restart.
+   Calls log to `dispoBuyerCalls`; per-buyer cycle state lives on the
+   buyer doc (dialDay, dialNextDate, dialStatus, lastDialDispo, lastDialAt).
+   dialStatus: 'paused' (Not Active — resumable), 'bad_number' / 'dnc' /
+   'interested' (permanently out of the queue). */
+const DD_OUTCOMES = [
+  { id: 'no_answer', label: 'No Answer' },
+  { id: 'interested', label: 'Interested' },
+  { id: 'not_active', label: 'Not Active' },
+  { id: 'bad_number', label: 'Bad Number' },
+  { id: 'dnc', label: 'DNC' }
+];
+const DD_CADENCE = [
+  { day: 1, action: 'Double Dial + VM + SMS' },
+  { day: 2, action: 'Double Dial + VM + SMS' },
+  { day: 3, action: 'Rest day — skip' },
+  { day: 4, action: 'Double Dial + VM + SMS (send deal)' }
+];
+let ddBooted = false;
+let ddQueue = [];
+let ddIdx = 0;
+let ddDealFilter = 'all';
+let ddStarted = false;
+let ddShowCadence = false;
+let ddBusy = false;
+let ddStats = null;
+function ddResetStats() { ddStats = { called: 0, no_answer: 0, interested: 0, not_active: 0, bad_number: 0, dnc: 0 }; }
+function ddBuyerName(b) {
+  const fl = [b.firstName, b.lastName].filter(Boolean).join(' ').trim();
+  return fl || b.name || 'Unknown buyer';
+}
+function ddOutcomeLabel(id) {
+  const o = DD_OUTCOMES.find(o => o.id === id);
+  return o ? o.label : (id || '—');
+}
+/* Callable = has a phone, not inactive, not DNC/bad-number/interested/paused */
+function ddCallable(b) {
+  if (!b || b.status === 'inactive') return false;
+  if (['dnc', 'bad_number', 'interested', 'paused'].includes(b.dialStatus)) return false;
+  return !!(b.phone && digitsOnly(b.phone));
+}
+function ddTodayStr() {
+  const d = new Date();
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+function ddDayAction(day) {
+  const c = DD_CADENCE.find(c => c.day === day) || DD_CADENCE[0];
+  return 'Day ' + c.day + ' — ' + c.action;
+}
+/* Day 2 → skip Day 3 → Day 4 lands 2 days out; otherwise next day */
+function ddNextDay(day) { return day === 1 ? 2 : day === 2 ? 4 : 1; }
+function ddNextDue(day) {
+  const d = new Date();
+  d.setDate(d.getDate() + (day === 2 ? 2 : 1));
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+function ddDueLabel(b) {
+  const t = ddTodayStr();
+  if (!b.dialNextDate || b.dialNextDate === t) return 'Due today';
+  if (b.dialNextDate < t) return 'Overdue — was due ' + fmtDate(b.dialNextDate);
+  return 'Due ' + fmtDate(b.dialNextDate);
+}
+async function ddBuildQueue() {
+  let pool = buyers.filter(ddCallable);
+  if (ddDealFilter !== 'all') {
+    try {
+      const snap = await db.collection('dispoBuyerSearchResults').where('dealId', '==', ddDealFilter).get();
+      const ids = new Set(snap.docs.map(d => (d.data() || {}).buyerId).filter(Boolean));
+      pool = pool.filter(b => ids.has(b.id));
+    } catch (e) { console.error('dialer deal filter failed', e); }
+  }
+  /* Due/overdue/never-called first, future-dated last */
+  pool.sort((a, b) => String(a.dialNextDate || '').localeCompare(String(b.dialNextDate || '')));
+  ddQueue = pool;
+  ddIdx = 0;
+}
+function ddCurrent() { return ddIdx < ddQueue.length ? ddQueue[ddIdx] : null; }
+
+function renderDialer() {
+  const pill = $('dialer-pill');
+  if (pill && ddBooted) pill.textContent = buyers.filter(ddCallable).length;
+  if (!ddBooted) {
+    $('content').innerHTML = '<div class="empty-state">Loading…</div>';
+    setTimeout(() => { if (tab === 'dialer' && !ddStarted) renderDialer(); }, 1500);
+    return;
+  }
+  if (!ddStats) ddResetStats();
+  if (!ddStarted) { renderDialerStart(); return; }
+  renderDialerMain();
+}
+function renderDialerStart() {
+  const callable = buyers.filter(ddCallable);
+  const paused = buyers.filter(b => b.dialStatus === 'paused' && b.status !== 'inactive');
+  const dealOpts = ['<option value="all">🤝 All buyers</option>'].concat(
+    deals.map(d => `<option value="${d.id}"${ddDealFilter === d.id ? ' selected' : ''}>📦 ${esc(d.address || 'Untitled deal')}</option>`)
+  ).join('');
+  $('content').innerHTML = `<div class="dd-wrap">
+    <div class="detail-card">
+      <h2>📞 Buyer Dialer</h2>
+      <div class="addr-sub">${callable.length} callable buyer${callable.length === 1 ? '' : 's'} · 4-day cycle</div>
+      <div class="section-label">Call list</div>
+      <div class="dd-filter"><select id="dd-deal-filter" onchange="ddChangeFilter(this)">${dealOpts}</select></div>
+      <button class="btn-gold" style="width:100%;min-height:52px;font-size:17px;" onclick="ddStart()">▶ Start calling</button>
+      <button class="btn-ghost" style="width:100%;margin-top:10px;" onclick="ddToggleCadence()">${ddShowCadence ? '▴ Hide' : '▾ Show'} call cadence</button>
+      ${ddShowCadence ? `<div class="dd-cadence" style="margin-top:12px;">
+        <b>Day 1</b> — Double Dial + VM + SMS<br>
+        <b>Day 2</b> — Double Dial + VM + SMS<br>
+        <b>Day 3</b> — Rest day (skip)<br>
+        <b>Day 4</b> — Double Dial + VM + SMS (send deal)<br>
+        <span style="color:#5c6b82;">No Answer advances to the next call day. Interested removes the buyer from the queue; Not Active pauses them; Bad Number / DNC remove them permanently.</span>
+      </div>` : ''}
+      ${ddStats && ddStats.called ? `<div class="dd-stats" style="margin-top:12px;">Session: 📞 ${ddStats.called} called · ✅ ${ddStats.interested} interested · 📵 ${ddStats.no_answer} no answer · ⏸️ ${ddStats.not_active} not active · ❌ ${ddStats.bad_number} bad # · 🚫 ${ddStats.dnc} DNC</div>` : ''}
+    </div>
+    ${paused.length ? `<div class="detail-card">
+      <h2 style="font-size:18px;">⏸️ Paused (Not Active) <span style="color:#8a97a8;font-size:13px;font-weight:400;">(${paused.length})</span></h2>
+      ${paused.map(b => `<div class="dd-paused-row"><span>${esc(ddBuyerName(b))}</span><button class="btn-ghost" onclick="ddResumeBuyer('${b.id}')">Resume</button></div>`).join('')}
+    </div>` : ''}
+  </div>`;
+}
+function ddChangeFilter(sel) { ddDealFilter = sel.value; renderDialerStart(); }
+function ddToggleCadence() { ddShowCadence = !ddShowCadence; renderDialerStart(); }
+async function ddStart() {
+  ddResetStats();
+  showToast('Building call queue…');
+  await ddBuildQueue();
+  ddStarted = true;
+  window.scrollTo(0, 0);
+  renderDialerMain();
+}
+function ddExit() { ddStarted = false; ddQueue = []; ddIdx = 0; renderDialerStart(); }
+function ddPrev() { if (ddIdx > 0) { ddIdx--; renderDialerMain(); } }
+function ddNext() {
+  if (ddIdx < ddQueue.length - 1) { ddIdx++; renderDialerMain(); }
+  else showToast('End of queue');
+}
+function renderDialerMain() {
+  const b = ddCurrent();
+  const total = ddQueue.length;
+  const dealName = ddDealFilter === 'all' ? '🤝 All buyers'
+    : '📦 ' + (((deals.find(d => d.id === ddDealFilter) || {}).address) || 'Deal');
+  let html = `<div class="dd-wrap">
+    <div class="dd-top">
+      <button class="btn-ghost" onclick="ddExit()">✕ Exit</button>
+      <div class="dd-progress">${esc(dealName)} · ${b ? (ddIdx + 1) + ' of ' + total : total + ' called'}</div>
+      <div style="width:70px;"></div>
+    </div>
+    <div class="dd-stats">📞 ${ddStats.called} called · ✅ ${ddStats.interested} interested · 📵 ${ddStats.no_answer} no answer · ⏸️ ${ddStats.not_active} not active · ❌ ${ddStats.bad_number} bad # · 🚫 ${ddStats.dnc} DNC</div>`;
+  if (!b) {
+    html += `<div class="dd-card dd-done">
+      <div style="font-size:48px;">🎉</div>
+      <h2 style="color:#e9edf3;">Queue complete!</h2>
+      <p style="color:#8a97a8;">Called ${ddStats.called} · ${ddStats.interested} interested</p>
+      <button class="btn-gold" onclick="ddExit()" style="margin:16px auto 0;">Back to dialer start</button>
+    </div></div>`;
+    $('content').innerHTML = html;
+    return;
+  }
+  const day = b.dialDay || 1;
+  const digits = digitsOnly(b.phone);
+  html += `
+    <div class="dd-card">
+      <div class="dd-day">📅 ${esc(ddDayAction(day))}</div>
+      <div class="dd-name">${esc(ddBuyerName(b))}</div>
+      <div class="dd-entity">${esc(b.type || '')}${b.type ? ' · ' : ''}${esc(ddDueLabel(b))}</div>
+      ${b.boughtPropertyAddress ? `<div class="dd-row">🏠 <b>${esc(b.boughtPropertyAddress)}</b>${b.boughtPropertyPrice ? ' · ' + esc(b.boughtPropertyPrice) : ''}</div>` : ''}
+      ${b.buyBox ? `<div class="dd-row">🎯 <i>${esc(b.buyBox)}</i></div>` : ''}
+      ${b.lastDialDispo ? `<div class="dd-last">Last: ${esc(ddOutcomeLabel(b.lastDialDispo))}${b.lastDialAt ? ' · ' + esc(fmtDate(b.lastDialAt)) : ''}</div>` : ''}
+      <a class="dd-call" href="tel:${digits}">📞 ${esc(formatPhone(b.phone))}</a>
+    </div>
+    <div class="dd-nav-row">
+      <button class="dd-nav-btn" onclick="ddPrev()">‹ Prev</button>
+      <button class="dd-nav-btn" onclick="ddNext()">Next ›</button>
+    </div>
+    <div class="dd-notes">
+      <div class="section-label" style="margin-bottom:8px;">Notes</div>
+      <textarea id="dd-note" rows="3" placeholder="Call notes…"></textarea>
+    </div>
+    <div class="dd-outcomes">
+      <div class="section-label" style="margin-bottom:8px;">Call Disposition</div>
+      <div class="dd-outcome-grid">
+        ${DD_OUTCOMES.map(o => `<button class="dd-outcome" onclick="ddApplyOutcome('${o.id}')">${o.label}</button>`).join('')}
+      </div>
+    </div>
+  </div>`;
+  $('content').innerHTML = html;
+  window.scrollTo(0, 0);
+}
+async function ddApplyOutcome(outcomeId) {
+  if (ddBusy) return;
+  const b = ddCurrent();
+  if (!b || !ddStats) return;
+  const oc = DD_OUTCOMES.find(o => o.id === outcomeId);
+  const label = oc ? oc.label : outcomeId;
+  if ((outcomeId === 'dnc' || outcomeId === 'bad_number') &&
+      !confirm(`"${label}" removes ${ddBuyerName(b)} from all future dialer queues. Continue?`)) return;
+  ddBusy = true;
+  const noteEl = $('dd-note');
+  const note = noteEl ? noteEl.value.trim() : '';
+  const at = new Date().toISOString();
+  try {
+    await db.collection('dispoBuyerCalls').add({
+      buyerId: b.id,
+      dealId: ddDealFilter !== 'all' ? ddDealFilter : null,
+      disposition: outcomeId,
+      notes: note,
+      at
+    });
+    const upd = { lastDialDispo: outcomeId, lastDialAt: at, updatedAt: at };
+    const day = b.dialDay || 1;
+    if (outcomeId === 'no_answer') { upd.dialDay = ddNextDay(day); upd.dialNextDate = ddNextDue(day); }
+    else if (outcomeId === 'interested') upd.dialStatus = 'interested';
+    else if (outcomeId === 'not_active') upd.dialStatus = 'paused';
+    else if (outcomeId === 'bad_number') upd.dialStatus = 'bad_number';
+    else if (outcomeId === 'dnc') upd.dialStatus = 'dnc';
+    await db.collection('dispoBuyers').doc(b.id).set(upd, { merge: true });
+    Object.assign(b, upd);
+  } catch (e) {
+    console.error('dialer log failed', e);
+    showToast('Log failed — check connection');
+    ddBusy = false;
+    return;
+  }
+  ddStats.called++;
+  if (ddStats[outcomeId] !== undefined) ddStats[outcomeId]++;
+  ddQueue.splice(ddIdx, 1);
+  if (ddIdx >= ddQueue.length) ddIdx = Math.max(0, ddQueue.length - 1);
+  ddBusy = false;
+  showToast(`${label} logged`);
+  renderDialerMain();
+}
+async function ddResumeBuyer(id) {
+  try {
+    await db.collection('dispoBuyers').doc(id).set(
+      { dialStatus: null, dialDay: 1, dialNextDate: null, updatedAt: new Date().toISOString() },
+      { merge: true }
+    );
+    const b = buyers.find(x => x.id === id);
+    if (b) { b.dialStatus = null; b.dialDay = 1; b.dialNextDate = null; }
+    renderDialerStart();
+    showToast('Buyer resumed');
+  } catch (e) {
+    console.error(e);
+    showToast('Resume failed — check connection');
+  }
+}
+
 </script>
 </body>
 </html>
