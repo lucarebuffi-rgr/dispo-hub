@@ -1297,6 +1297,20 @@ async function geocodeAddress(addr) {
   } catch (e) {}
   return null;
 }
+// Street addresses often don't resolve (rural/new) — fall back to city/state/ZIP,
+// then city/state, so the subject pin still lands near the property.
+async function geocodeAddressFallback(address) {
+  const parts = String(address || '').split(',').map(s => s.trim()).filter(Boolean);
+  for (let i = 0; i < parts.length; i++) {
+    const q = parts.slice(i).join(', ');
+    if (!q) continue;
+    try {
+      const g = await geocodeAddress(q + ', USA');
+      if (g && g.lat && g.lng) return g;
+    } catch (e) {}
+  }
+  return null;
+}
 async function renderBuyerSearch() {
   $('content').innerHTML = '<div class="empty-state">Loading searches…</div>';
   let searches = [];
@@ -1357,7 +1371,7 @@ async function renderBuyerSearch() {
 }
 async function queueBuyerSearch({ address, propertyTypes, radiusMiles, notes, dealId }) {
   showToast('Locating property…');
-  const geo = await geocodeAddress(address + ', USA');
+  const geo = await geocodeAddressFallback(address);
   const rec = {
     address, propertyTypes: propertyTypes || [], radiusMiles: radiusMiles || 0.5, monthsBack: 12, notes: notes || '',
     status: 'queued',
@@ -1532,12 +1546,13 @@ function initBuyerMap(s, results) {
       radius: s.radiusMiles * 1609.34, color: '#d4a843', weight: 2,
       fillColor: '#d4a843', fillOpacity: 0.08, dashArray: '6 6'
     }).addTo(map);
-    // Subject marker (red pin)
+    // Subject marker (red pin, always on top)
     const starIcon = L.divIcon({
-      className: '', html: '<div style="font-size:30px;filter:drop-shadow(0 2px 4px rgba(0,0,0,.6));">📍</div>',
-      iconSize: [30, 30], iconAnchor: [15, 28]
+      className: '', html: '<div style="font-size:40px;filter:drop-shadow(0 2px 6px rgba(0,0,0,.75));">📍</div>',
+      iconSize: [40, 40], iconAnchor: [20, 38]
     });
-    L.marker([s.lat, s.lng], { icon: starIcon }).addTo(map)
+    L.circle([s.lat, s.lng], { radius: 900, color: '#e05252', weight: 2.5, fillColor: '#e05252', fillOpacity: 0.07, dashArray: '10 8' }).addTo(map);
+    L.marker([s.lat, s.lng], { icon: starIcon, zIndexOffset: 1000 }).addTo(map)
       .bindPopup(`<b>Subject</b><br>${esc(s.address)}`);
     // Buyer purchase markers (blue)
     const dotIcon = L.divIcon({
@@ -1593,7 +1608,7 @@ async function initDealBuyerMap(deal, pulledBuyers) {
     }
     if (!dealGeo) {
       const daddr = [deal.address, deal.city, deal.state, deal.zip].filter(Boolean).join(', ');
-      if (daddr) { try { dealGeo = await geocodeAddress(daddr + ', USA'); } catch (e) {} }
+      if (daddr) { try { dealGeo = await geocodeAddressFallback(daddr); } catch (e) {} }
     }
     // Buyer pins: cached coords first, then Nominatim at max 1 req/sec, caching back to the buyer doc
     const pins = [];
@@ -1639,10 +1654,11 @@ async function initDealBuyerMap(deal, pulledBuyers) {
       pts.push([dealGeo.lat, dealGeo.lng]);
       const subjectIcon = L.divIcon({
         className: '',
-        html: '<div style="font-size:30px;filter:drop-shadow(0 2px 4px rgba(0,0,0,.6));">📍</div>',
-        iconSize: [30, 30], iconAnchor: [15, 28]
+        html: '<div style="font-size:40px;filter:drop-shadow(0 2px 6px rgba(0,0,0,.75));">📍</div>',
+        iconSize: [40, 40], iconAnchor: [20, 38]
       });
-      L.marker([dealGeo.lat, dealGeo.lng], { icon: subjectIcon }).addTo(map)
+      L.circle([dealGeo.lat, dealGeo.lng], { radius: 900, color: '#e05252', weight: 2.5, fillColor: '#e05252', fillOpacity: 0.07, dashArray: '10 8' }).addTo(map);
+      L.marker([dealGeo.lat, dealGeo.lng], { icon: subjectIcon, zIndexOffset: 1000 }).addTo(map)
         .bindPopup('<b>🏠 Deal (subject)</b><br>' + esc(deal.address || ''));
     }
     pins.forEach(({ pb, lat, lng }) => {
