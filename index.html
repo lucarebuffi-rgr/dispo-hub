@@ -772,6 +772,7 @@ async function openDeal(id) {
       </div>
       <div style="margin-top:18px;display:flex;gap:10px;flex-wrap:wrap;">
         <button class="btn-gold" onclick="shareDeal('${d.id}')">🔗 Share Deal Page</button>
+        <button class="btn-gold" onclick="searchBuyersForDeal('${d.id}')">🔍 Search For Buyers</button>
         <button class="btn-ghost" onclick='showDealForm(${JSON.stringify(d.id)})'>✏️ Edit</button>
         <button class="btn-ghost" onclick="armConfirm(this, () => deleteDeal('${d.id}'))" style="color:#e07a77;border-color:rgba(217,83,79,.4);">🗑️ Delete</button>
         <select id="stage-select" onchange="setStage('${d.id}', this.value)" style="padding:10px 12px;border-radius:10px;border:1px solid #22385a;background:#0b1626;color:#e9edf3;font-size:14px;">
@@ -1282,7 +1283,8 @@ async function renderBuyerSearch() {
             <span>🎯 <b data-rcount="${s.id}">…</b> buyers found</span>
           </div>
           <div style="margin-top:10px;" onclick="event.stopPropagation();">
-            <button class="btn-ghost" style="padding:8px 12px;min-height:0;" onclick="linkSearchToDeal('${s.id}')">🔗 Link buyers to deal</button>
+            ${s.dealId ? `<span style="font-size:13px;color:#e8c476;">🔗 ${esc((deals.find(x => x.id === s.dealId) || {}).address || 'Linked deal')}</span>`
+              : `<button class="btn-ghost" style="padding:8px 12px;min-height:0;" onclick="linkSearchToDeal('${s.id}')">🔗 Link buyers to deal</button>`}
           </div>
         </div>`).join('') : '<div class="timeline-empty">No searches yet — run your first one above.</div>'}
     </div>`;
@@ -1292,6 +1294,20 @@ async function renderBuyerSearch() {
   rsnap.docs.forEach(doc => { const r = doc.data(); counts[r.searchId] = (counts[r.searchId] || 0) + 1; });
   document.querySelectorAll('[data-rcount]').forEach(el => { el.textContent = counts[el.dataset.rcount] || 0; });
 }
+async function queueBuyerSearch({ address, propertyType, radiusMiles, notes, dealId }) {
+  showToast('Locating property…');
+  const geo = await geocodeAddress(address + ', USA');
+  const rec = {
+    address, propertyType: propertyType || '', radiusMiles: radiusMiles || 0.5, monthsBack: 12, notes: notes || '',
+    status: 'queued',
+    lat: geo ? geo.lat : '', lng: geo ? geo.lng : '',
+    createdAt: new Date().toISOString()
+  };
+  if (dealId) rec.dealId = dealId;
+  const ref = await db.collection('dispoBuyerSearches').add(rec);
+  showToast('Search queued — DISPO MANAGER is on it');
+  return ref;
+}
 async function submitBuyerSearch() {
   const address = ($('bs-address').value || '').trim();
   const propertyType = ($('bs-ptype').value || '').trim();
@@ -1299,17 +1315,58 @@ async function submitBuyerSearch() {
   if (!propertyType) { showToast('Select a property type'); return; }
   const radiusMiles = parseFloat($('bs-radius').value) || 0.5;
   const notes = ($('bs-notes').value || '').trim();
-  showToast('Locating property…');
-  const geo = await geocodeAddress(address + ', USA');
-  const rec = {
-    address, propertyType, radiusMiles, monthsBack: 12, notes,
-    status: 'queued',
-    lat: geo ? geo.lat : '', lng: geo ? geo.lng : '',
-    createdAt: new Date().toISOString()
+  const ref = await queueBuyerSearch({ address, propertyType, radiusMiles, notes });
+  if (ref) askAddDealBoard(address, propertyType, ref.id);
+}
+// After a manual Find Buyers search: ask if it's also a deal for the board
+function askAddDealBoard(address, propertyType, searchId) {
+  const ov = document.createElement('div');
+  ov.style.cssText = 'position:fixed;inset:0;z-index:999;background:rgba(0,0,0,.6);display:flex;align-items:flex-end;justify-content:center;';
+  ov.innerHTML = `<div style="background:#10233d;border:1px solid #22385a;border-radius:16px 16px 0 0;width:100%;max-width:560px;padding:18px;">
+    <h3 style="margin:0 0 6px;font-size:17px;">Is this also a deal?</h3>
+    <div class="addr-sub" style="margin-bottom:14px;">Add <b>${esc(address)}</b> to the deal board too?</div>
+    <div style="display:flex;gap:10px;">
+      <button class="btn-gold" style="flex:1;" id="adb-yes">➕ Add to Deal Board</button>
+      <button class="btn-ghost" style="flex:1;" id="adb-no">Not now</button>
+    </div>
+  </div>`;
+  document.body.appendChild(ov);
+  const close = (goSearch) => { ov.remove(); if (goSearch) openBuyerSearch(searchId); };
+  ov.onclick = e => { if (e.target === ov) close(true); };
+  ov.querySelector('#adb-no').onclick = () => close(true);
+  ov.querySelector('#adb-yes').onclick = () => {
+    ov.remove();
+    prefillDealForm(address, propertyType);
   };
-  const ref = await db.collection('dispoBuyerSearches').add(rec);
-  showToast('Search queued — DISPO MANAGER is on it');
-  openBuyerSearch(ref.id);
+}
+// Open a blank deal form with the search address + property type filled in
+function prefillDealForm(address, propertyType) {
+  showDealForm();
+  const parts = String(address || '').split(',').map(x => x.trim()).filter(Boolean);
+  if ($('df-address')) $('df-address').value = parts[0] || address || '';
+  if (parts.length >= 2 && $('df-city')) $('df-city').value = parts[1] || '';
+  if (parts.length >= 3) {
+    const st = parts[2].split(/\s+/).filter(Boolean);
+    if ($('df-state') && st[0]) $('df-state').value = st[0];
+    if ($('df-zip') && st[1]) $('df-zip').value = st[1];
+  }
+  if ($('df-propertyType')) $('df-propertyType').value = propertyType || '';
+  window.scrollTo(0, 0);
+}
+// "Search For Buyers" from a deal: queues the exact same search DISPO MANAGER works, linked to the deal
+async function searchBuyersForDeal(dealId) {
+  const d = deals.find(x => x.id === dealId);
+  if (!d) return;
+  const address = [d.address, d.city, d.state, d.zip].filter(Boolean).join(', ');
+  if (!address) { showToast('Deal has no address'); return; }
+  const ref = await queueBuyerSearch({
+    address,
+    propertyType: d.propertyType || '',
+    radiusMiles: 0.5,
+    notes: '',
+    dealId: d.id
+  });
+  if (ref) { await loadAll(); switchTab('find'); }
 }
 async function openBuyerSearch(id) {
   const doc = await db.collection('dispoBuyerSearches').doc(id).get();
@@ -1563,8 +1620,11 @@ async function pushResultToBuyers(resultId) {  const doc = await db.collection('
     });
     buyerId = ref.id;
   }
-  await db.collection('dispoBuyerSearchResults').doc(resultId).set({ buyerId }, { merge: true });
-  showToast(existing ? 'Linked to existing buyer' : 'Buyer added to Buyers DB');
+  const sdoc0 = r.searchId ? await db.collection('dispoBuyerSearches').doc(r.searchId).get() : null;
+  const autoDealId = sdoc0 && sdoc0.exists ? (sdoc0.data().dealId || '') : '';
+  await db.collection('dispoBuyerSearchResults').doc(resultId).set(
+    autoDealId ? { buyerId, dealId: autoDealId } : { buyerId }, { merge: true });
+  showToast((existing ? 'Linked to existing buyer' : 'Buyer added to Buyers DB') + (autoDealId ? ' — linked to deal' : ''));
   await loadAll();
   const sdoc = await db.collection('dispoBuyerSearches').doc(r.searchId).get();
   if (sdoc.exists) openBuyerSearch(r.searchId);
