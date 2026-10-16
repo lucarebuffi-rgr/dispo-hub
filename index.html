@@ -716,7 +716,6 @@ async function openDeal(id) {
   openDealId = id;
   const d = deals.find(x => x.id === id);
   if (!d) { switchTab('deals'); return; }
-  const matches = rankedBuyers(d);
   const offersSnap = await db.collection('dispoOffers').where('dealId', '==', id).get();
   const offers = offersSnap.docs.map(o => ({ id: o.id, ...o.data() })).sort((a, b) => (+b.amount || 0) - (+a.amount || 0));
   // InvestorBase pulled buyers linked to this deal via dispoBuyerSearchResults
@@ -800,38 +799,25 @@ async function openDeal(id) {
     </div>
 
     <div class="detail-card">
-      <h2 style="font-size:18px;">🎯 Matched Buyers <span style="color:#8a97a8;font-size:13px;font-weight:400;">(${matches.length})</span></h2>
-      <div class="addr-sub">Ranked by buy-box fit — call from the top down.</div>
-      ${matches.length ? `<button class="btn-gold" style="width:100%;min-height:52px;margin-bottom:12px;" onclick="startDialer('${id}')">📞 Start Call Session (${matches.length} buyers)</button>` : ''}
-      ${matches.length ? matches.slice(0, 20).map(m => `
-        <div class="match-row">
-          <div class="match-score">${m.score}</div>
-          <div class="match-info">
-            <div class="n">${esc(m.buyer.name)}</div>
-            ${[m.buyer.firstName, m.buyer.lastName].filter(Boolean).join(' ') ? `<div class="w" style="color:#e8c476;">👤 ${esc([m.buyer.firstName, m.buyer.lastName].filter(Boolean).join(' '))}</div>` : ''}
-            <div class="w">${esc(m.why.join(' · '))}</div>
-          </div>
-          ${m.buyer.phone ? `<a class="call-link match-call" href="tel:${digitsOnly(m.buyer.phone)}">📞</a>` : `<span style="font-size:12px;color:#5c6b82;">no phone</span>`}
-        </div>`).join('') : '<div class="timeline-empty">No buyers match this deal yet — add buyers or import from the sheet.</div>'}
-    </div>
-
-    <div class="detail-card">
       <h2 style="font-size:18px;">🔗 Pulled Buyers <span style="color:#8a97a8;font-size:13px;font-weight:400;">(${pulledBuyers.length})</span></h2>
-      <div class="addr-sub">InvestorBase pulls linked to this deal — alongside the buy-box Matched Buyers above.</div>
+      <div class="addr-sub">Cash buyers pulled from InvestorBase for this deal.</div>
+      ${pulledBuyers.length ? `<button class="btn-gold" style="width:100%;min-height:52px;margin-bottom:12px;" onclick="startDialer('${id}')">📞 Start Call Session (${pulledBuyers.length} buyers)</button>` : ''}
       ${pulledBuyers.length ? pulledBuyers.map(pb => {
         const b = pb._buyer;
         const nm = (b && b.name) || pb.buyerName || 'Unknown buyer';
+        const person = b ? [b.firstName, b.lastName].filter(Boolean).join(' ') : '';
         const addr = (b && b.boughtPropertyAddress) || pb.boughtPropertyAddress || pb.purchaseAddress || '';
         const price = (b && b.boughtPropertyPrice) || pb.boughtPropertyPrice || (pb.soldPrice ? String(pb.soldPrice) : '');
         return `
         <div class="match-row"${b ? ` onclick="openBuyer('${b.id}')" style="cursor:pointer;"` : ''}>
           <div class="match-info">
             <div class="n">${esc(nm)}</div>
+            ${person ? `<div class="w" style="color:#e8c476;">👤 ${esc(person)}</div>` : ''}
             <div class="w">${addr ? '📍 ' + esc(addr) : ''}${addr && price ? ' · ' : ''}${price ? '💰 ' + esc(price) : ''}${!addr && !price ? '—' : ''}</div>
           </div>
           ${b && b.phone ? `<a class="call-link match-call" href="tel:${digitsOnly(b.phone)}" onclick="event.stopPropagation()">📞</a>` : `<span style="font-size:12px;color:#5c6b82;">${b ? 'no phone' : ''}</span>`}
         </div>`;
-      }).join('') : '<div class="timeline-empty">No pulled buyers linked yet — link them from 🔍 Find Buyers.</div>'}
+      }).join('') : '<div class="timeline-empty">No InvestorBase buyers pulled for this deal yet — tap 🔍 Search For Buyers above.</div>'}
     </div>
 
     <div class="detail-card">
@@ -1800,11 +1786,25 @@ async function renderKPIs() {
 
 /* ================= Dispo dialer ================= */
 let dialer = null; // {dealId, queue:[{buyer,score,why}], idx, outcomes:{}}
-function startDialer(dealId) {
+async function startDialer(dealId) {
   const d = deals.find(x => x.id === dealId);
   if (!d) return;
-  const queue = rankedBuyers(d);
-  if (!queue.length) { showToast('No matched buyers to call'); return; }
+  // Call session runs ONLY on this deal's InvestorBase-pulled buyers (no local auto-matching)
+  let queue = [];
+  try {
+    const psnap = await db.collection('dispoBuyerSearchResults').where('dealId', '==', dealId).get();
+    queue = psnap.docs.map(doc => {
+      const r = doc.data();
+      const b = r.buyerId ? (buyers.find(x => x.id === r.buyerId) || null) : null;
+      if (!b) return null;
+      const why = ['Pulled from InvestorBase'];
+      const baddr = b.boughtPropertyAddress || r.boughtPropertyAddress || r.purchaseAddress || '';
+      const bprice = b.boughtPropertyPrice || r.boughtPropertyPrice || (r.soldPrice ? String(r.soldPrice) : '');
+      if (baddr || bprice) why.push('🏠 Bought: ' + baddr + (baddr && bprice ? ' for ' : '') + bprice);
+      return { buyer: b, score: '', why };
+    }).filter(Boolean);
+  } catch (e) { queue = []; }
+  if (!queue.length) { showToast('No pulled buyers to call yet'); return; }
   dialer = { dealId, queue, idx: 0, outcomes: {} };
   renderDealDialer();
 }
@@ -1823,7 +1823,7 @@ function renderDealDialer() {
       </div>
       <button class="btn-ghost" onclick="closeDialer()">✕ End</button>
     </div>
-    <div style="text-align:center;padding:10px;font-size:13px;color:#8a97a8;">Buyer ${dialer.idx + 1} of ${dialer.queue.length} · Match score <b style="color:#e8c476;">${item.score}</b></div>
+    <div style="text-align:center;padding:10px;font-size:13px;color:#8a97a8;">Buyer ${dialer.idx + 1} of ${dialer.queue.length}${item.score ? ` · Match score <b style="color:#e8c476;">${item.score}</b>` : ' · InvestorBase pull'}</div>
     <div style="flex:1;overflow-y:auto;padding:6px 16px 20px;max-width:560px;width:100%;margin:0 auto;">
       <div class="detail-card" style="text-align:center;">
         <div style="font-size:22px;font-weight:800;">${esc(b.name)}</div>
