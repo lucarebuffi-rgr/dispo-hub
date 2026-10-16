@@ -792,6 +792,16 @@ async function openDeal(id) {
     </div>
 
     <div class="detail-card">
+      <h2 style="font-size:18px;">🗺 Buyer Map <span id="deal-map-count" style="color:#8a97a8;font-size:13px;font-weight:400;"></span></h2>
+      <div class="addr-sub">Pulled buyers pinned around the deal — InvestorBase style. Tap a pin for details.</div>
+      <div id="deal-buyer-map" style="height:300px;border-radius:12px;overflow:hidden;margin-top:10px;background:#0b1626;"></div>
+      <div id="deal-map-status" style="font-size:12px;color:#8a97a8;margin-top:8px;"></div>
+      <div style="display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:#8a97a8;margin-top:6px;">
+        <span>⭐ Deal</span><span>🟢 Entity / cash buyer</span><span>🔵 Individual</span><span>🟣 Trust</span><span>⚪ Other</span>
+      </div>
+    </div>
+
+    <div class="detail-card">
       <h2 style="font-size:18px;">💰 Offers <span style="color:#8a97a8;font-size:13px;font-weight:400;">(${offers.length})</span></h2>
       <div id="offers-list">${offers.length ? offers.map(o => `
         <div class="match-row">
@@ -816,6 +826,7 @@ async function openDeal(id) {
     </div>
   </div>`;
   window.scrollTo(0, 0);
+  try { initDealBuyerMap(d, pulledBuyers); } catch (e) { console.error('deal map init failed', e); }
   if (d.driveFolderUrl && editingDriveFor !== d.id) {
     fetchDrivePhotos(d.id, d.driveFolderUrl);
     fetchDriveFolderName(d.id, d.driveFolderUrl);
@@ -1356,6 +1367,112 @@ function initBuyerMap(s, results) {
     if (pts.length > 1) map.fitBounds(pts, { padding: [30, 30] });
     setTimeout(() => map.invalidateSize(), 300);
   } catch (e) { console.error('map failed', e); }
+}
+function buyerPinColor(type) {
+  const t = (type || '').toLowerCase();
+  if (/llc|corp|inc\b|reit|partner|entity|holding/.test(t)) return '#4caf82';
+  if (/individual/.test(t)) return '#4a9fe0';
+  if (/trust/.test(t)) return '#c084fc';
+  return '#8a97a8';
+}
+function buyerDotIcon(color) {
+  return L.divIcon({
+    className: '',
+    html: '<div style="width:18px;height:18px;border-radius:50%;background:' + color + ';border:2px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.5);"></div>',
+    iconSize: [18, 18], iconAnchor: [9, 9]
+  });
+}
+async function initDealBuyerMap(deal, pulledBuyers) {
+  const mapEl = document.getElementById('deal-buyer-map');
+  const statusEl = document.getElementById('deal-map-status');
+  const countEl = document.getElementById('deal-map-count');
+  if (!mapEl || typeof L === 'undefined') return;
+  const setStatus = txt => { if (statusEl) statusEl.textContent = txt || ''; };
+  try {
+    if (window._dealBuyerMap) { window._dealBuyerMap.remove(); window._dealBuyerMap = null; }
+    if (!pulledBuyers.length) {
+      mapEl.innerHTML = '<div class="timeline-empty">No pulled buyers linked yet — link them from 🔍 Find Buyers.</div>';
+      return;
+    }
+    // Deal location: linked search lat/lng first, else geocode the deal address
+    let dealGeo = null;
+    const searchIds = [...new Set(pulledBuyers.map(pb => pb.searchId).filter(Boolean))];
+    for (const sid of searchIds) {
+      try {
+        const sdoc = await db.collection('dispoBuyerSearches').doc(sid).get();
+        const s = sdoc.exists ? sdoc.data() : null;
+        if (s && s.lat && s.lng) { dealGeo = { lat: +s.lat, lng: +s.lng }; break; }
+      } catch (e) {}
+    }
+    if (!dealGeo) {
+      const daddr = [deal.address, deal.city, deal.state, deal.zip].filter(Boolean).join(', ');
+      if (daddr) { try { dealGeo = await geocodeAddress(daddr + ', USA'); } catch (e) {} }
+    }
+    // Buyer pins: cached coords first, then Nominatim at max 1 req/sec, caching back to the buyer doc
+    const pins = [];
+    const toLocate = [];
+    pulledBuyers.forEach(pb => {
+      const b = pb._buyer;
+      const lat = (b && b.buyerLat) || pb.lat || '';
+      const lng = (b && b.buyerLng) || pb.lng || '';
+      if (lat && lng) pins.push({ pb, lat: +lat, lng: +lng });
+      else toLocate.push(pb);
+    });
+    if (toLocate.length) setStatus('Locating ' + toLocate.length + ' buyer' + (toLocate.length === 1 ? '' : 's') + ' on map…');
+    for (const pb of toLocate) {
+      const b = pb._buyer;
+      const addr = (b && b.boughtPropertyAddress) || pb.boughtPropertyAddress || pb.purchaseAddress || '';
+      if (addr) {
+        let geo = null;
+        try { geo = await geocodeAddress(addr + ', USA'); } catch (e) {}
+        try { await new Promise(r => setTimeout(r, 1100)); } catch (e) {}
+        if (geo && geo.lat && geo.lng) {
+          pins.push({ pb, lat: +geo.lat, lng: +geo.lng });
+          if (b && b.id) {
+            try {
+              await db.collection('dispoBuyers').doc(b.id).set({ buyerLat: +geo.lat, buyerLng: +geo.lng }, { merge: true });
+              b.buyerLat = +geo.lat; b.buyerLng = +geo.lng;
+            } catch (e) {}
+          }
+        }
+      }
+    }
+    setStatus(pins.length ? '' : 'Could not locate any buyer addresses on the map.');
+    if (countEl) countEl.textContent = '(' + pins.length + ')';
+    if (!dealGeo && !pins.length) {
+      mapEl.innerHTML = '<div class="timeline-empty">No mappable locations yet.</div>';
+      return;
+    }
+    const map = L.map('deal-buyer-map').setView(
+      dealGeo ? [dealGeo.lat, dealGeo.lng] : [pins[0].lat, pins[0].lng], 11);
+    window._dealBuyerMap = map;
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(map);
+    const pts = [];
+    if (dealGeo) {
+      pts.push([dealGeo.lat, dealGeo.lng]);
+      const starIcon = L.divIcon({
+        className: '',
+        html: '<div style="font-size:26px;filter:drop-shadow(0 2px 4px rgba(0,0,0,.6));">⭐</div>',
+        iconSize: [26, 26], iconAnchor: [13, 13]
+      });
+      L.marker([dealGeo.lat, dealGeo.lng], { icon: starIcon }).addTo(map)
+        .bindPopup('<b>🏠 Deal</b><br>' + esc(deal.address || ''));
+    }
+    pins.forEach(({ pb, lat, lng }) => {
+      const b = pb._buyer;
+      const nm = (b && (b.firstName || b.lastName) ? [b.firstName, b.lastName].filter(Boolean).join(' ') : (b && b.name)) || pb.buyerName || 'Unknown buyer';
+      const addr = (b && b.boughtPropertyAddress) || pb.boughtPropertyAddress || pb.purchaseAddress || '';
+      const price = (b && b.boughtPropertyPrice) || pb.boughtPropertyPrice || (pb.soldPrice ? String(pb.soldPrice) : '');
+      pts.push([lat, lng]);
+      const popup = '<b>' + esc(nm) + '</b>'
+        + (b && b.phone ? '<br>📞 ' + esc(b.phone) : '')
+        + (addr ? '<br>📍 ' + esc(addr) : '')
+        + (price ? '<br>💰 ' + esc(price) : '');
+      L.marker([lat, lng], { icon: buyerDotIcon(buyerPinColor(b && b.type)) }).addTo(map).bindPopup(popup);
+    });
+    if (pts.length > 1) map.fitBounds(pts, { padding: [30, 30] });
+    setTimeout(() => map.invalidateSize(), 300);
+  } catch (e) { console.error('deal buyer map failed', e); }
 }
 async function logSearchResult(searchId) {
   const buyerName = ($('br-name').value || '').trim();
