@@ -747,6 +747,14 @@ function showDealForm(dealId, searchId) {
         ${compFld('compPlumbing', 'Plumbing', d.compPlumbing)}
         ${compFld('compCosmetic', 'Cosmetic quality', d.compCosmetic)}
       </div>
+      <div class="section-label">Condition details (shows on the landing page under Components)</div>
+      <div class="form-field"><label>Roof <span style="color:var(--gray);font-weight:400;">— Age / condition details</span></label><textarea id="df-condRoof" rows="2" placeholder="Age / condition details">${esc(d.condRoof || '')}</textarea></div>
+      <div class="form-field"><label>HVAC <span style="color:var(--gray);font-weight:400;">— Age / condition details</span></label><textarea id="df-condHvac" rows="2" placeholder="Age / condition details">${esc(d.condHvac || '')}</textarea></div>
+      <div class="form-field"><label>Plumbing <span style="color:var(--gray);font-weight:400;">— Age / condition details</span></label><textarea id="df-condPlumbing" rows="2" placeholder="Age / condition details">${esc(d.condPlumbing || '')}</textarea></div>
+      <div class="form-field"><label>Electrical <span style="color:var(--gray);font-weight:400;">— Age / condition details</span></label><textarea id="df-condElectrical" rows="2" placeholder="Age / condition details">${esc(d.condElectrical || '')}</textarea></div>
+      <div class="form-field"><label>Foundation <span style="color:var(--gray);font-weight:400;">— Age / condition details</span></label><textarea id="df-condFoundation" rows="2" placeholder="Age / condition details">${esc(d.condFoundation || '')}</textarea></div>
+      <div class="form-field"><label>Interior <span style="color:var(--gray);font-weight:400;">— Condition details</span></label><textarea id="df-condInterior" rows="2" placeholder="Condition details">${esc(d.condInterior || '')}</textarea></div>
+      <div class="form-field"><label>Other property details <span style="color:var(--gray);font-weight:400;">— Windows / driveway / water heater / appliances / exterior / pool / etc.</span></label><textarea id="df-condOther" rows="2" placeholder="Windows / driveway / water heater / appliances / exterior / pool / etc.">${esc(d.condOther || '')}</textarea></div>
       <div class="section-label">Seller</div>
       <div class="form-grid">
         ${fld('sellerName', 'Seller name', d.sellerName)}
@@ -779,6 +787,10 @@ async function saveDealForm(id) {
     askPrice: num('askPrice'), assignmentFee: num('assignmentFee'), closeByDate: v('closeByDate'),
     sellerName: v('sellerName'), sellerPhone: v('sellerPhone'), notes: $('df-notes').value.trim(),
     compRoof: v('compRoof'), compHvac: v('compHvac'), compPlumbing: v('compPlumbing'), compCosmetic: v('compCosmetic'),
+    condRoof: $('df-condRoof').value.trim(), condHvac: $('df-condHvac').value.trim(),
+    condPlumbing: $('df-condPlumbing').value.trim(), condElectrical: $('df-condElectrical').value.trim(),
+    condFoundation: $('df-condFoundation').value.trim(), condInterior: $('df-condInterior').value.trim(),
+    condOther: $('df-condOther').value.trim(),
     driveFolderUrl: v('driveFolderUrl'), headline: v('headline'),
     slug: (v('address') || '').replace(/[^a-zA-Z0-9]/g, ''),
     updatedAt: new Date().toISOString()
