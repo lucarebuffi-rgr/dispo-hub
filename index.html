@@ -13,6 +13,8 @@
 <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700&family=Inter:wght@400;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <style>
@@ -283,6 +285,63 @@ const firebaseConfig = {
 };
 firebase.initializeApp(firebaseConfig);
 const db = firebase.firestore();
+
+/* ---------------- Gmail sending (DispoHub deal email blasts) ----------------
+   Sends straight from luca.rebuffi@royalgroupsrealty.com via the Gmail API.
+   First use pops a Google consent screen (gmail.send scope); the token lasts
+   ~1 hour and auto re-prompts on 401. */
+const gmailProvider = new firebase.auth.GoogleAuthProvider();
+gmailProvider.addScope('https://www.googleapis.com/auth/gmail.send');
+let gmailAccessToken = '';
+async function ensureGmailAuth() {
+  if (gmailAccessToken) return gmailAccessToken;
+  const res = await firebase.auth().signInWithPopup(gmailProvider);
+  gmailAccessToken = (res.credential && res.credential.accessToken) || '';
+  if (!gmailAccessToken) throw new Error('Google sign-in did not return an access token.');
+  return gmailAccessToken;
+}
+function rfc2047(s) {
+  const bytes = new TextEncoder().encode(String(s));
+  let bin = ''; bytes.forEach(b => bin += String.fromCharCode(b));
+  return '=?UTF-8?B?' + btoa(bin) + '?=';
+}
+function b64urlEncode(str) {
+  const bytes = new TextEncoder().encode(str);
+  let bin = ''; bytes.forEach(b => bin += String.fromCharCode(b));
+  return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+function buildMime(to, subject, textBody, htmlBody, attachments) {
+  const boundary = 'dispo' + Date.now();
+  let raw = 'From: Luca Rebuffi <luca.rebuffi@royalgroupsrealty.com>\r\n';
+  raw += 'To: ' + to + '\r\n';
+  raw += 'Subject: ' + rfc2047(subject) + '\r\n';
+  raw += 'MIME-Version: 1.0\r\n';
+  raw += 'Content-Type: multipart/mixed; boundary="' + boundary + '"\r\n\r\n';
+  raw += '--' + boundary + '\r\nContent-Type: multipart/alternative; boundary="alt-' + boundary + '"\r\n\r\n';
+  raw += '--alt-' + boundary + '\r\nContent-Type: text/plain; charset="UTF-8"\r\nContent-Transfer-Encoding: 8bit\r\n\r\n' + textBody + '\r\n\r\n';
+  raw += '--alt-' + boundary + '\r\nContent-Type: text/html; charset="UTF-8"\r\nContent-Transfer-Encoding: 8bit\r\n\r\n' + htmlBody + '\r\n\r\n';
+  raw += '--alt-' + boundary + '--\r\n';
+  (attachments || []).forEach(a => {
+    raw += '--' + boundary + '\r\nContent-Type: ' + a.mime + '; name="' + a.filename + '"\r\nContent-Transfer-Encoding: base64\r\nContent-Disposition: attachment; filename="' + a.filename + '"\r\n\r\n';
+    raw += a.b64.replace(/(.{76})/g, '$1\r\n') + '\r\n\r\n';
+  });
+  raw += '--' + boundary + '--';
+  return raw;
+}
+async function gmailSendRaw(raw, retried) {
+  const token = await ensureGmailAuth();
+  const res = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
+    method: 'POST',
+    headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ raw: b64urlEncode(raw) })
+  });
+  if (res.status === 401 && !retried) { gmailAccessToken = ''; return gmailSendRaw(raw, true); }
+  if (!res.ok) { const t = await res.text().catch(() => ''); throw new Error('Gmail send failed (' + res.status + '): ' + t.slice(0, 180)); }
+  return res.json();
+}
+async function sendDealEmail(to, subject, textBody, htmlBody, attachments) {
+  return gmailSendRaw(buildMime(to, subject, textBody, htmlBody, attachments));
+}
 
 /* Google Drive API key — powers the deal photo carousel (reads folders shared
    as "Anyone with the link"). Same key as the GA Probates CRM. */
@@ -828,6 +887,7 @@ async function openDeal(id) {
       <h2 style="font-size:18px;">🏆 Top Ranked Buyers <span style="color:#8a97a8;font-size:13px;font-weight:400;">(${topRanked.length})</span></h2>
       <div class="addr-sub">InvestorBase Smart Match picks for this deal — call these first.</div>
       ${topRanked.length ? `<button class="btn-gold" style="width:100%;min-height:52px;margin-bottom:12px;" onclick="startDialer('${id}')">📞 Start Call Session (${topRanked.length} buyers)</button>` : ''}
+      <button class="btn-ghost" style="width:100%;min-height:52px;margin-bottom:12px;" onclick="openEmailBlast('${id}')">📧 Email Buyers</button>
       ${topRanked.length ? topRanked.map(pb => {
         const b = pb._buyer;
         const nm = (b && b.name) || pb.buyerName || 'Unknown buyer';
@@ -1198,6 +1258,7 @@ async function renderPublicDeal(id) {
           ${d.notes ? `<div style="margin-top:14px;font-size:14px;color:#aeb9c7;line-height:1.7;white-space:pre-wrap;">${esc(d.notes)}</div>` : ''}
         </div>
       </div>
+      <div id="pub-photos"></div>
       <div style="margin:18px 16px 0;background:linear-gradient(180deg,#1e3a5f,#182c49);border:1px solid #d4a843;border-radius:18px;padding:22px;">
         <div style="font-size:18px;font-weight:800;color:#e8c476;margin-bottom:4px;">💰 Make an Offer</div>
         <div style="font-size:13px;color:#8a97a8;margin-bottom:14px;">Serious cash buyers only. We'll be in touch shortly.</div>
@@ -1217,6 +1278,7 @@ async function renderPublicDeal(id) {
       </div>
       <div style="text-align:center;color:#5c6b82;font-size:12px;margin-top:22px;">Powered by DispoHub</div>
     </div>`;
+    if (d.driveFolderUrl) loadPublicPhotos(d.driveFolderUrl);
     window.scrollTo(0, 0);
   } catch (e) {
     console.error(e);
@@ -2001,6 +2063,334 @@ function closeDialer() {
   });
 }
 
+/* ================= Deal email blasts =================
+   Sends from luca.rebuffi@royalgroupsrealty.com via the Gmail API:
+   - Deal page "📧 Email Buyers": paced blast (1 per 90s) to Top Ranked or all pulled buyers with email
+   - Buyer card "📧 Deal Email": one-off send for a single buyer + chosen deal
+   Every email carries the landing-page link + a PNG preview of the landing page. */
+const BLAST_PACE_MS = 90000; // 1 email every 90 seconds
+const LUCA_PHONE_DISPO = '(469) 606-3358';
+const LUCA_MAIL_ADDR = '1185 Fossett Rd, Concord, GA 30206';
+
+function dealLandingURL(deal) { return location.origin + location.pathname + '?deal=' + deal.id; }
+function personFirstName(buyer) {
+  const fn = ((buyer && buyer.firstName) || '').trim();
+  if (fn) return fn;
+  const nm = ((buyer && buyer.name) || '').trim();
+  if (nm && !/\b(llc|inc|corp|properties|holdings|investments|group|partners|enterprises)\b/i.test(nm)) return nm.split(/\s+/)[0];
+  return '';
+}
+function fillBody(tpl, deal, buyer) {
+  const fn = personFirstName(buyer) || 'there';
+  return String(tpl)
+    .split('{firstName}').join(fn)
+    .split('{address}').join(deal.address || '')
+    .split('{city}').join(deal.city || '')
+    .split('{state}').join(deal.state || 'GA')
+    .split('{ask}').join(money(deal.askPrice))
+    .split('{arv}').join(money(deal.arv))
+    .split('{beds}').join(deal.beds || '—')
+    .split('{baths}').join(deal.baths || '—')
+    .split('{sqft}').join(deal.sqft ? (+deal.sqft).toLocaleString() : '—')
+    .split('{link}').join(dealLandingURL(deal));
+}
+function fillSubject(tpl, deal, buyer) {
+  const fn = personFirstName(buyer);
+  return String(tpl)
+    .split('{firstName}').join(fn ? fn + ' — ' : '')
+    .split('{address}').join(deal.address || '')
+    .split('{city}').join(deal.city || '')
+    .split('{state}').join(deal.state || 'GA')
+    .split('{link}').join(dealLandingURL(deal));
+}
+function defaultEmailSubject() { return '{firstName}off-market deal in {city}, {state}'; }
+function defaultEmailBody() {
+  return 'Hey {firstName},\n\nLuca Rebuffi here — I just put an off-market deal under contract in {city}, {state} and wanted you to see it before it goes anywhere else:\n\n{address}\nAsking {ask} · ARV {arv} · {beds} bd / {baths} ba · {sqft} sqft\n\nI attached a preview of the deal page so you know exactly what you are opening. Full details and photos here:\n{link}\n\nIf the numbers work, just reply to this email or call/text me at ' + LUCA_PHONE_DISPO + '.\n\n— Luca\n\n---\nNo longer want deal alerts? Reply STOP and I will take you off the list.\nRoyal Groups Realty · ' + LUCA_MAIL_ADDR;
+}
+function dealEmailInner(deal, bodyText, photoURL) {
+  const link = dealLandingURL(deal);
+  const paras = String(bodyText).split(/\n{2,}/).map(p => p.trim()).filter(Boolean);
+  const ctaBtn = '<div style="text-align:center;margin:20px 0 8px;"><a href="' + link + '" style="display:inline-block;background:#d4a843;color:#0a1423;font-weight:800;font-size:17px;padding:15px 40px;border-radius:12px;text-decoration:none;">View the Deal &rarr;</a></div>';
+  const htmlParas = paras.map(p => {
+    if (/^---+$/.test(p)) return '<div style="border-top:1px solid #22385a;margin:20px 0;"></div>';
+    let h = esc(p).replace(/\n/g, '<br />');
+    if (p.indexOf(link) !== -1) {
+      h = h.split(esc(link)).join('');
+      return '<div style="margin:0 0 14px;font-size:15px;line-height:1.65;color:#dbe3ee;">' + h + '</div>' + ctaBtn +
+        '<div style="text-align:center;font-size:11px;color:#8a97a8;word-break:break-all;margin-bottom:6px;"><a href="' + link + '" style="color:#7fb3ff;">' + esc(link) + '</a></div>';
+    }
+    return '<div style="margin:0 0 14px;font-size:15px;line-height:1.65;color:#dbe3ee;">' + h + '</div>';
+  }).join('');
+  return '<table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td align="center">' +
+    '<table role="presentation" width="600" cellpadding="0" cellspacing="0" style="width:100%;max-width:600px;background:#101f36;border:1px solid #22385a;border-radius:16px;">' +
+    '<tr><td style="background:#16294a;padding:22px 24px;text-align:center;border-radius:16px 16px 0 0;">' +
+    '<div style="font-size:11px;letter-spacing:3px;color:#d4a843;font-weight:700;">DISPO HUB &middot; ROYAL GROUPS REALTY</div>' +
+    '<div style="font-size:21px;font-weight:800;color:#ffffff;margin-top:8px;">' + esc(deal.address || '') + '</div>' +
+    '<div style="color:#aeb9c7;font-size:14px;margin-top:2px;">' + esc(deal.city || '') + (deal.city ? ', ' : '') + esc(deal.state || 'GA') + ' ' + esc(deal.zip || '') + '</div></td></tr>' +
+    (photoURL ? '<tr><td><img src="' + photoURL + '" alt="" style="width:100%;display:block;" /></td></tr>' : '') +
+    '<tr><td style="padding:20px 24px;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>' +
+    '<td width="40%" valign="top"><div style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:#8a97a8;">Asking</div><div style="font-size:25px;font-weight:800;color:#4caf82;">' + money(deal.askPrice) + '</div></td>' +
+    '<td width="35%" valign="top"><div style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:#8a97a8;">ARV</div><div style="font-size:20px;font-weight:800;color:#e8c476;">' + money(deal.arv) + '</div></td>' +
+    '<td width="25%" valign="top"><div style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:#8a97a8;">Beds / Baths</div><div style="font-size:15px;font-weight:700;color:#dbe3ee;">' + esc(deal.beds || '—') + ' / ' + esc(deal.baths || '—') + '</div></td>' +
+    '</tr></table></td></tr>' +
+    '<tr><td style="padding:4px 24px 20px;">' + htmlParas + '</td></tr>' +
+    '<tr><td style="padding:16px 24px;border-top:1px solid #22385a;text-align:center;border-radius:0 0 16px 16px;">' +
+    '<div style="font-size:12px;color:#5c6b82;line-height:1.7;">Luca Rebuffi &middot; Royal Groups Realty<br />' + LUCA_PHONE_DISPO + ' &middot; luca.rebuffi@royalgroupsrealty.com<br />' + LUCA_MAIL_ADDR + '</div></td></tr>' +
+    '</table></td></tr></table>';
+}
+function dealEmailHTML(deal, bodyText, photoURL) {
+  return '<!DOCTYPE html><html><head><meta charset="UTF-8" /></head><body style="margin:0;padding:0;background:#0a1423;"><div style="background:#0a1423;padding:24px 12px;">' + dealEmailInner(deal, bodyText, photoURL) + '</div></body></html>';
+}
+async function dealPhotoURLs(deal) {
+  if (!deal || !deal.driveFolderUrl) return [];
+  const folderId = extractDriveFolderId(deal.driveFolderUrl);
+  if (!folderId) return [];
+  try {
+    const q = encodeURIComponent("'" + folderId + "' in parents and mimeType contains 'image/' and trashed = false");
+    const res = await fetch('https://www.googleapis.com/drive/v3/files?q=' + q + '&key=' + GOOGLE_API_KEY + '&fields=files(id,thumbnailLink)&pageSize=12');
+    const data = await res.json();
+    return (data.files || []).map(f => (f.thumbnailLink || '').replace(/=s\d+.*$/, '=s800'));
+  } catch (e) { return []; }
+}
+function buildShotCard(deal, photoURL) {
+  let el = document.getElementById('email-shot');
+  if (!el) { el = document.createElement('div'); el.id = 'email-shot'; el.style.cssText = 'position:fixed;left:-10000px;top:0;width:600px;'; document.body.appendChild(el); }
+  el.innerHTML =
+    '<div style="width:600px;background:#0d1b2e;font-family:Arial,sans-serif;overflow:hidden;">' +
+    '<div style="background:linear-gradient(135deg,#1e3a5f,#16294a);padding:26px;text-align:center;">' +
+    '<div style="font-size:11px;letter-spacing:4px;color:#d4a843;font-weight:700;">DISPO HUB</div>' +
+    '<div style="font-size:15px;color:#8a97a8;margin-top:6px;">Off-Market Investment Opportunity</div></div>' +
+    (photoURL ? '<img src="' + photoURL + '" crossorigin="anonymous" style="width:600px;height:340px;object-fit:cover;display:block;" />' : '') +
+    '<div style="padding:26px;">' +
+    '<div style="font-size:26px;font-weight:800;color:#ffffff;">' + esc(deal.address || '') + '</div>' +
+    '<div style="color:#aeb9c7;font-size:15px;margin-top:4px;">' + esc(deal.city || '') + (deal.city ? ', ' : '') + esc(deal.state || 'GA') + ' ' + esc(deal.zip || '') + '</div>' +
+    '<div style="margin-top:18px;"><div style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:#8a97a8;">Asking</div><div style="font-size:32px;font-weight:800;color:#4caf82;">' + money(deal.askPrice) + '</div></div>' +
+    '<div style="margin-top:6px;"><div style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:#8a97a8;">ARV</div><div style="font-size:24px;font-weight:800;color:#e8c476;">' + money(deal.arv) + '</div></div>' +
+    '<div style="margin-top:14px;font-size:14px;color:#aeb9c7;">Beds: ' + esc(deal.beds || '—') + ' &nbsp;·&nbsp; Baths: ' + esc(deal.baths || '—') + ' &nbsp;·&nbsp; Sqft: ' + (deal.sqft ? (+deal.sqft).toLocaleString() : '—') + '</div>' +
+    '<div style="margin-top:22px;text-align:center;"><span style="display:inline-block;background:#d4a843;color:#0a1423;font-weight:800;font-size:17px;padding:14px 40px;border-radius:12px;">View the Deal</span></div>' +
+    '</div></div>';
+  return el;
+}
+async function dealPreviewPNG(deal) {
+  const urls = await dealPhotoURLs(deal);
+  const el = buildShotCard(deal, urls[0] || '');
+  const imgs = el.querySelectorAll('img');
+  await Promise.all(Array.from(imgs).map(img => img.complete ? Promise.resolve() : new Promise(res => { img.onload = res; img.onerror = res; setTimeout(res, 5000); })));
+  await new Promise(r => setTimeout(r, 300));
+  const canvas = await html2canvas(el, { scale: 2, useCORS: true, backgroundColor: '#0d1b2e' });
+  return canvas.toDataURL('image/png').split(',')[1];
+}
+async function dealPulledBuyers(dealId) {
+  const psnap = await db.collection('dispoBuyerSearchResults').where('dealId', '==', dealId).get();
+  return psnap.docs.map(doc => {
+    const r = { id: doc.id, ...doc.data() };
+    r._buyer = r.buyerId ? (buyers.find(b => b.id === r.buyerId) || null) : null;
+    return r;
+  });
+}
+let blastRun = null;
+function closeEmailOverlay() { const el = document.getElementById('email-blast'); if (el) el.remove(); }
+function maybeCloseEmailOverlay() {
+  if (blastRun && !blastRun.finished) {
+    if (!confirm('A blast is still running. Close this screen and let it finish in the background?')) return;
+    showToast('Blast continues in the background');
+  }
+  blastRun = null;
+  closeEmailOverlay();
+}
+async function openEmailBlast(dealId) {
+  const d = deals.find(x => x.id === dealId);
+  if (!d) return;
+  ensureGmailAuth().catch(e => console.warn('gmail pre-auth:', e.message));
+  showToast('Loading buyers…');
+  let pulled = [];
+  try { pulled = await dealPulledBuyers(dealId); } catch (e) { showToast('Could not load buyers'); return; }
+  const withEmail = pulled.filter(r => r._buyer && r._buyer.email && r._buyer.status !== 'inactive');
+  const top = withEmail.filter(r => r.smartMatch === true);
+  blastRun = null;
+  closeEmailOverlay();
+  document.body.insertAdjacentHTML('beforeend', `
+  <div id="email-blast" style="position:fixed;inset:0;z-index:3000;background:rgba(4,10,20,.94);overflow-y:auto;">
+    <div style="max-width:640px;margin:0 auto;padding:18px 16px 60px;">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
+        <div style="font-size:18px;font-weight:800;">📧 Email Buyers</div>
+        <button class="btn-ghost" onclick="maybeCloseEmailOverlay()">✕</button>
+      </div>
+      <div style="font-size:13px;color:#8a97a8;margin-bottom:14px;">${esc(d.address)} · from luca.rebuffi@royalgroupsrealty.com · 1 every 90 seconds</div>
+      <div class="detail-card">
+        <div class="section-label" style="margin-top:0;">Recipients</div>
+        ${top.length ? `<label style="display:block;font-size:14px;margin-bottom:8px;"><input type="radio" name="eb-group" value="top" checked /> 🏆 Top Ranked with email (${top.length})</label>` : ''}
+        <label style="display:block;font-size:14px;margin-bottom:4px;"><input type="radio" name="eb-group" value="all" ${top.length ? '' : 'checked'} /> 📋 All pulled buyers with email (${withEmail.length})</label>
+        ${!withEmail.length ? '<div style="color:#e07a77;font-size:13px;margin-top:8px;">No buyers with email addresses on this deal yet.</div>' : ''}
+      </div>
+      <div class="detail-card">
+        <div class="section-label" style="margin-top:0;">Subject</div>
+        <input id="eb-subject" style="width:100%;padding:12px;border-radius:10px;border:1px solid #22385a;background:#0b1626;color:#e9edf3;font-size:15px;" value="${esc(defaultEmailSubject())}" />
+        <div class="section-label">Message</div>
+        <textarea id="eb-body" style="width:100%;padding:12px;border-radius:10px;border:1px solid #22385a;background:#0b1626;color:#e9edf3;font-size:15px;min-height:260px;">${esc(defaultEmailBody())}</textarea>
+        <div style="font-size:11px;color:#5c6b82;margin-top:6px;">Placeholders: {firstName} {address} {city} {state} {ask} {arv} {beds} {baths} {sqft} {link}</div>
+      </div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;">
+        <button class="btn-ghost" style="flex:1;min-height:52px;" onclick="previewBlast('${d.id}')">👁 Preview</button>
+        <button class="btn-gold" id="eb-send" style="flex:2;min-height:52px;" ${withEmail.length ? '' : 'disabled'} onclick="startBlast('${d.id}')">🚀 Send Blast</button>
+      </div>
+      <div id="eb-preview" style="margin-top:14px;"></div>
+      <div id="eb-progress" style="margin-top:14px;display:none;"></div>
+      <div style="font-size:11px;color:#5c6b82;margin-top:12px;">Keep DispoHub open until the blast finishes — background tabs may pause the timer.</div>
+    </div>
+  </div>`);
+  window.scrollTo(0, 0);
+}
+async function previewBlast(dealId) {
+  const d = deals.find(x => x.id === dealId); if (!d) return;
+  const pv = document.getElementById('eb-preview'); if (!pv) return;
+  pv.innerHTML = '<div style="color:#8a97a8;font-size:13px;">Rendering preview…</div>';
+  try {
+    const subj = ($('eb-subject') || {}).value || '';
+    const body = ($('eb-body') || {}).value || '';
+    const sample = { firstName: 'Patrick' };
+    const urls = await dealPhotoURLs(d);
+    const html = dealEmailInner(d, fillBody(body, d, sample), urls[0] || '');
+    let shot = '';
+    try {
+      const png = await dealPreviewPNG(d);
+      shot = '<div class="section-label">Attached preview image</div><img src="data:image/png;base64,' + png + '" style="width:100%;border-radius:12px;border:1px solid #22385a;" />';
+    } catch (e) { shot = '<div style="font-size:12px;color:#e07a77;">Preview image failed: ' + esc(e.message) + '</div>'; }
+    pv.innerHTML = '<div class="detail-card"><div class="section-label" style="margin-top:0;">Subject preview</div><div style="font-size:14px;font-weight:700;">' + esc(fillSubject(subj, d, sample)) + '</div></div>' +
+      '<div class="detail-card"><div class="section-label" style="margin-top:0;">Email preview</div><div style="background:#0a1423;border-radius:12px;padding:12px;overflow-x:auto;">' + html + '</div></div>' +
+      '<div class="detail-card">' + shot + '</div>';
+    window.scrollTo(0, document.body.scrollHeight);
+  } catch (e) { pv.innerHTML = '<div style="color:#e07a77;font-size:13px;">Preview failed: ' + esc(e.message) + '</div>'; }
+}
+function paceCountdown(ms) {
+  return new Promise(resolve => {
+    const end = Date.now() + ms;
+    const iv = setInterval(() => {
+      if (!blastRun || blastRun.cancel) { clearInterval(iv); resolve(); return; }
+      const left = Math.max(0, end - Date.now());
+      const el = document.getElementById('eb-countdown');
+      if (el) el.textContent = 'Next email in ' + Math.floor(left / 60000) + ':' + String(Math.floor(left % 60000 / 1000)).padStart(2, '0');
+      if (left <= 0) { clearInterval(iv); resolve(); }
+    }, 1000);
+  });
+}
+async function startBlast(dealId) {
+  const d = deals.find(x => x.id === dealId); if (!d || blastRun) return;
+  const group = (document.querySelector('input[name="eb-group"]:checked') || {}).value || 'all';
+  let pulled = [];
+  try { pulled = await dealPulledBuyers(dealId); } catch (e) { showToast('Could not load buyers'); return; }
+  let recips = pulled.filter(r => r._buyer && r._buyer.email && r._buyer.status !== 'inactive');
+  if (group === 'top') recips = recips.filter(r => r.smartMatch === true);
+  if (!recips.length) { showToast('No recipients in this group'); return; }
+  const mins = Math.ceil(recips.length * 1.5);
+  if (!confirm('Send ' + recips.length + ' emails, one every 90 seconds (~' + mins + ' min)?\n\nKeep DispoHub open until it finishes.')) return;
+  const sendBtn = document.getElementById('eb-send'); if (sendBtn) sendBtn.disabled = true;
+  const prog = document.getElementById('eb-progress');
+  const subjTpl = ($('eb-subject') || {}).value || defaultEmailSubject();
+  const bodyTpl = ($('eb-body') || {}).value || defaultEmailBody();
+  blastRun = { cancel: false, finished: false };
+  let ok = 0, fail = 0; const logArr = [];
+  const pushLog = line => { logArr.push(line); if (logArr.length > 60) logArr.shift(); };
+  const renderProg = (done, note) => {
+    if (!prog) return;
+    prog.style.display = 'block';
+    const pct = Math.round(done / recips.length * 100);
+    prog.innerHTML = '<div class="detail-card"><div class="section-label" style="margin-top:0;">Sending… ' + done + ' of ' + recips.length + '</div>' +
+      '<div style="height:10px;background:#0b1626;border-radius:6px;overflow:hidden;margin-bottom:10px;"><div style="height:100%;width:' + pct + '%;background:linear-gradient(90deg,#d4a843,#e8c476);"></div></div>' +
+      '<div id="eb-countdown" style="font-size:13px;color:#8a97a8;margin-bottom:8px;">' + esc(note || '') + '</div>' +
+      '<div id="eb-log" style="font-size:12px;color:#aeb9c7;max-height:180px;overflow-y:auto;background:#0b1626;border-radius:8px;padding:10px;">' + logArr.map(l => '<div>' + esc(l) + '</div>').join('') + '</div>' +
+      '<button class="btn-ghost" style="width:100%;min-height:48px;margin-top:10px;" onclick="cancelBlast()">⏹ Cancel Blast</button></div>';
+    const lg = document.getElementById('eb-log'); if (lg) lg.scrollTop = lg.scrollHeight;
+  };
+  let blastRef = null;
+  try { blastRef = await db.collection('dispoEmailBlasts').add({ type: 'blast', dealId, dealAddress: d.address, startedAt: new Date().toISOString(), total: recips.length, sent: 0, failed: 0, status: 'running' }); } catch (e) { console.warn('blast log failed', e); }
+  renderProg(0, 'Preparing preview image…');
+  let pngB64 = '', photoURL = '';
+  try { const urls = await dealPhotoURLs(d); photoURL = urls[0] || ''; pngB64 = await dealPreviewPNG(d); }
+  catch (e) { pushLog('⚠️ Preview image failed (' + e.message + ') — sending without attachment'); }
+  const atts = pngB64 ? [{ filename: 'deal-preview.png', mime: 'image/png', b64: pngB64 }] : [];
+  for (let i = 0; i < recips.length; i++) {
+    if (!blastRun || blastRun.cancel) break;
+    const b = recips[i]._buyer;
+    const bodyFilled = fillBody(bodyTpl, d, b);
+    try {
+      await sendDealEmail(b.email, fillSubject(subjTpl, d, b), bodyFilled, dealEmailHTML(d, bodyFilled, photoURL), atts);
+      ok++; pushLog('✅ ' + (i + 1) + '/' + recips.length + ' ' + b.email);
+    } catch (e) { fail++; pushLog('❌ ' + (i + 1) + '/' + recips.length + ' ' + b.email + ' — ' + e.message); }
+    if (blastRef) blastRef.set({ sent: ok, failed: fail }, { merge: true }).catch(() => {});
+    renderProg(i + 1, i < recips.length - 1 ? '' : 'Finishing…');
+    if (i < recips.length - 1 && blastRun && !blastRun.cancel) await paceCountdown(BLAST_PACE_MS);
+  }
+  const cancelled = !blastRun || blastRun.cancel;
+  if (blastRef) blastRef.set({ status: cancelled ? 'cancelled' : 'done', finishedAt: new Date().toISOString() }, { merge: true }).catch(() => {});
+  blastRun = { cancel: false, finished: true };
+  renderProg(recips.length, cancelled ? 'Cancelled.' : 'Done.');
+  showToast(cancelled ? 'Blast cancelled' : 'Blast done: ' + ok + ' sent' + (fail ? ', ' + fail + ' failed' : ''));
+}
+function cancelBlast() { if (blastRun) blastRun.cancel = true; showToast('Cancelling after the current email…'); }
+async function openSingleEmail(buyerId) {
+  const b = buyers.find(x => x.id === buyerId);
+  if (!b || !b.email) { showToast('No email on this buyer'); return; }
+  ensureGmailAuth().catch(e => console.warn('gmail pre-auth:', e.message));
+  const opts = deals.filter(dd => !['dead', 'closed'].includes(dd.stage))
+    .map(dd => '<option value="' + dd.id + '">' + esc(dd.address) + '</option>').join('');
+  blastRun = null;
+  closeEmailOverlay();
+  document.body.insertAdjacentHTML('beforeend', `
+  <div id="email-blast" style="position:fixed;inset:0;z-index:3000;background:rgba(4,10,20,.94);overflow-y:auto;">
+    <div style="max-width:640px;margin:0 auto;padding:18px 16px 60px;">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
+        <div style="font-size:18px;font-weight:800;">📧 Email Buyer</div>
+        <button class="btn-ghost" onclick="maybeCloseEmailOverlay()">✕</button>
+      </div>
+      <div style="font-size:13px;color:#8a97a8;margin-bottom:14px;">To: ${esc(b.email)} · from luca.rebuffi@royalgroupsrealty.com</div>
+      <div class="detail-card">
+        <div class="section-label" style="margin-top:0;">Deal</div>
+        <select id="se-deal" style="width:100%;padding:12px;border-radius:10px;border:1px solid #22385a;background:#0b1626;color:#e9edf3;font-size:15px;">${opts}</select>
+        <div class="section-label">Subject</div>
+        <input id="se-subject" style="width:100%;padding:12px;border-radius:10px;border:1px solid #22385a;background:#0b1626;color:#e9edf3;font-size:15px;" value="${esc(defaultEmailSubject())}" />
+        <div class="section-label">Message</div>
+        <textarea id="se-body" style="width:100%;padding:12px;border-radius:10px;border:1px solid #22385a;background:#0b1626;color:#e9edf3;font-size:15px;min-height:260px;">${esc(defaultEmailBody())}</textarea>
+        <div style="font-size:11px;color:#5c6b82;margin-top:6px;">Placeholders: {firstName} {address} {city} {state} {ask} {arv} {beds} {baths} {sqft} {link}</div>
+      </div>
+      <button class="btn-gold" id="se-send" style="width:100%;min-height:56px;" onclick="sendSingleEmail('${b.id}')">🚀 Send Now</button>
+    </div>
+  </div>`);
+  window.scrollTo(0, 0);
+}
+async function sendSingleEmail(buyerId) {
+  const b = buyers.find(x => x.id === buyerId); if (!b) return;
+  const dealId = ($('se-deal') || {}).value || '';
+  const d = deals.find(x => x.id === dealId);
+  if (!d) { showToast('Pick a deal first'); return; }
+  const btn = document.getElementById('se-send');
+  if (btn) { btn.disabled = true; btn.textContent = 'Sending…'; }
+  try {
+    const subjTpl = ($('se-subject') || {}).value || defaultEmailSubject();
+    const bodyTpl = ($('se-body') || {}).value || defaultEmailBody();
+    const bodyFilled = fillBody(bodyTpl, d, b);
+    const urls = await dealPhotoURLs(d);
+    let pngB64 = '';
+    try { pngB64 = await dealPreviewPNG(d); } catch (e) { console.warn('shot failed', e); }
+    await sendDealEmail(b.email, fillSubject(subjTpl, d, b), bodyFilled, dealEmailHTML(d, bodyFilled, urls[0] || ''), pngB64 ? [{ filename: 'deal-preview.png', mime: 'image/png', b64: pngB64 }] : []);
+    db.collection('dispoEmailBlasts').add({ type: 'single', dealId, dealAddress: d.address, to: b.email, buyerId, startedAt: new Date().toISOString(), status: 'done', sent: 1 }).catch(() => {});
+    showToast('Email sent to ' + b.email);
+    closeEmailOverlay();
+  } catch (e) {
+    showToast('Send failed: ' + e.message);
+    if (btn) { btn.disabled = false; btn.textContent = '🚀 Send Now'; }
+  }
+}
+/* Public landing page: photo gallery under the hero card */
+async function loadPublicPhotos(folderUrl) {
+  const el = document.getElementById('pub-photos');
+  if (!el) return;
+  const urls = await dealPhotoURLs({ driveFolderUrl: folderUrl });
+  if (!urls.length) return;
+  el.innerHTML = '<div style="display:flex;gap:10px;overflow-x:auto;scroll-snap-type:x mandatory;margin:18px 16px 0;padding-bottom:4px;">' +
+    urls.slice(0, 12).map(u => '<img src="' + u + '" loading="lazy" style="width:80%;max-width:440px;height:250px;object-fit:cover;border-radius:14px;scroll-snap-align:center;flex:0 0 auto;border:1px solid #2a4a73;" />').join('') + '</div>';
+}
+
 /* ================= Buyer form + detail ================= */
 function showBuyerForm(buyerId) {
   const b = buyerId ? (buyers.find(x => x.id === buyerId) || {}) : {};
@@ -2100,6 +2490,7 @@ function openBuyer(id) {
       <div style="display:flex;gap:10px;flex-wrap:wrap;margin:6px 0 4px;">
         ${b.phone ? `<a class="btn-gold" href="tel:${digitsOnly(b.phone)}" style="text-decoration:none;">📞 ${esc(formatPhone(b.phone))}</a>` : '<span style="color:#e07a77;font-size:14px;font-weight:700;">⚠️ No phone — needs skip trace (DISPO MANAGER)</span>'}
         ${b.email ? `<a class="btn-ghost" href="mailto:${esc(b.email)}" style="text-decoration:none;">✉️ Email</a>` : ''}
+        ${b.email ? `<button class="btn-ghost" onclick="openSingleEmail('${b.id}')">📧 Deal Email</button>` : ''}
       </div>
       <div class="section-label">Buy Box</div>
       <div style="font-size:14px;color:#aeb9c7;font-style:italic;">🎯 ${esc(b.buyBox || 'Not recorded')}</div>
