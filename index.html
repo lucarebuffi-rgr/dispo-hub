@@ -2102,6 +2102,9 @@ function closeDialer() {
    Every email carries the landing-page link + a PNG preview of the landing page. */
 const BLAST_PACE_MS = 90000; // 1 email every 90 seconds
 const LUCA_PHONE_DISPO = '(469) 606-3358';
+function dealPhoneDispo(deal) {
+  return String((deal || {}).state || '').toUpperCase() === 'GA' ? '(770) 762-5598' : '(469) 606-3358';
+}
 const LUCA_MAIL_ADDR = '1185 Fossett Rd, Concord, GA 30206';
 
 function dealSlug(deal) { return String(deal.slug || '').trim() || String(deal.address || '').replace(/[^a-zA-Z0-9]/g, '') || deal.id; }
@@ -2125,7 +2128,8 @@ function fillBody(tpl, deal, buyer) {
     .split('{beds}').join(deal.beds || '—')
     .split('{baths}').join(deal.baths || '—')
     .split('{sqft}').join(deal.sqft ? (+deal.sqft).toLocaleString() : '—')
-    .split('{link}').join(dealLandingURL(deal));
+    .split('{link}').join(dealLandingURL(deal))
+    .split('{phone}').join(dealPhoneDispo(deal));
 }
 function fillSubject(tpl, deal, buyer) {
   const fn = personFirstName(buyer);
@@ -2138,7 +2142,7 @@ function fillSubject(tpl, deal, buyer) {
 }
 function defaultEmailSubject() { return '{firstName}off-market deal in {city}, {state}'; }
 function defaultEmailBody() {
-  return 'Hey {firstName},\n\nLuca Rebuffi here — I just put an off-market deal under contract in {city}, {state} and wanted you to see it before it goes anywhere else:\n\n{address}\nAsking {ask} · ARV {arv} · {beds} bd / {baths} ba · {sqft} sqft\n\nI attached a preview of the deal page so you know exactly what you are opening. Full details and photos here:\n{link}\n\nIf the numbers work, just reply to this email or call/text me at ' + LUCA_PHONE_DISPO + '.\n\n— Luca\n\n---\nNo longer want deal alerts? Reply STOP and I will take you off the list.\nRoyal Groups Realty · ' + LUCA_MAIL_ADDR;
+  return 'Hey {firstName},\n\nLuca Rebuffi here — I just put an off-market deal under contract in {city}, {state} and wanted you to see it before it goes anywhere else:\n\n{address}\nAsking {ask} · ARV {arv} · {beds} bd / {baths} ba · {sqft} sqft\n\nI attached a preview of the deal page so you know exactly what you are opening. Full details and photos here:\n{link}\n\nIf the numbers work, just reply to this email or call/text me at {phone}.\n\n— Luca\n\n---\nNo longer want deal alerts? Reply STOP and I will take you off the list.\nRoyal Groups Realty · ' + LUCA_MAIL_ADDR;
 }
 function dealEmailInner(deal, bodyText, photoURL) {
   const link = dealLandingURL(deal);
@@ -2168,7 +2172,7 @@ function dealEmailInner(deal, bodyText, photoURL) {
     '</tr></table></td></tr>' +
     '<tr><td style="padding:4px 24px 20px;">' + htmlParas + '</td></tr>' +
     '<tr><td style="padding:16px 24px;border-top:1px solid #e5e7eb;text-align:center;border-radius:0 0 16px 16px;">' +
-    '<div style="font-size:12px;color:#6b7280;line-height:1.7;">Luca Rebuffi &middot; Royal Groups Realty<br />' + '(469) 665-8481' + ' &middot; luca.rebuffi@royalgroupsrealty.com<br />' + LUCA_MAIL_ADDR + '</div></td></tr>' +
+    '<div style="font-size:12px;color:#6b7280;line-height:1.7;">Luca Rebuffi &middot; Royal Groups Realty<br />' + dealPhoneDispo(deal) + ' &middot; luca.rebuffi@royalgroupsrealty.com<br />' + LUCA_MAIL_ADDR + '</div></td></tr>' +
     '</table></td></tr></table>';
 }
 function dealEmailHTML(deal, bodyText, photoURL) {
@@ -2207,7 +2211,7 @@ function buildShotCard(deal, photoURL) {
     '<div style="font-family:Georgia,serif;font-size:40px;font-weight:800;color:#16a34a;">' + money(deal.askPrice) + '</div>' +
     '<div style="margin-top:8px;font-size:14px;color:#6b7280;">ARV ' + money(deal.arv) + ' &nbsp;·&nbsp; ' + esc(deal.beds || '—') + ' bd &nbsp;·&nbsp; ' + esc(deal.baths || '—') + ' ba &nbsp;·&nbsp; ' + (deal.sqft ? (+deal.sqft).toLocaleString() + ' sq ft' : '—') + '</div>' +
     '<div style="margin-top:22px;text-align:center;"><span style="display:inline-block;background:#8a5c14;color:#ffffff;font-weight:800;font-size:17px;padding:14px 44px;border-radius:6px;">View the Deal</span></div>' +
-    '<div style="margin-top:18px;text-align:center;font-size:12px;color:#6b7280;">Royal Groups Realty · (469) 665-8481</div>' +
+    '<div style="margin-top:18px;text-align:center;font-size:12px;color:#6b7280;">Royal Groups Realty · ' + dealPhoneDispo(deal) + '</div>' +
     '</div></div>';
   return el;
 }
