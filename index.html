@@ -708,6 +708,11 @@ function showDealForm(dealId, searchId) {
   const d = dealId ? (deals.find(x => x.id === dealId) || {}) : {};
   const fld = (key, label, val, type) =>
     `<div class="form-field"><label>${label}</label><input type="${type || 'text'}" id="df-${key}" value="${esc(val == null ? '' : val)}"></div>`;
+  const compFld = (key, label, val) =>
+    `<div class="form-field"><label>${label}</label><select id="df-${key}">
+      <option value="">— not set —</option>
+      ${['Good', 'Fair', 'Poor'].map(o => `<option value="${o}"${val === o ? ' selected' : ''}>${o}</option>`).join('')}
+    </select></div>`;
   $('content').innerHTML = `<div class="detail-wrap">
     <button class="back-btn" onclick="switchTab('deals')">← Back to deals</button>
     <div class="detail-card">
@@ -734,6 +739,13 @@ function showDealForm(dealId, searchId) {
         ${fld('askPrice', 'Ask price $', d.askPrice, 'number')}
         ${fld('assignmentFee', 'Assignment fee target $', d.assignmentFee, 'number')}
         ${fld('closeByDate', 'Close-by / contingency date', d.closeByDate, 'date')}
+      </div>
+      <div class="section-label">Components (condition — shows on the landing page)</div>
+      <div class="form-grid">
+        ${compFld('compRoof', 'Roof', d.compRoof)}
+        ${compFld('compHvac', 'HVAC', d.compHvac)}
+        ${compFld('compPlumbing', 'Plumbing', d.compPlumbing)}
+        ${compFld('compCosmetic', 'Cosmetic quality', d.compCosmetic)}
       </div>
       <div class="section-label">Seller</div>
       <div class="form-grid">
@@ -766,6 +778,7 @@ async function saveDealForm(id) {
     contractPrice: num('contractPrice'), arv: num('arv'), repairEst: num('repairEst'),
     askPrice: num('askPrice'), assignmentFee: num('assignmentFee'), closeByDate: v('closeByDate'),
     sellerName: v('sellerName'), sellerPhone: v('sellerPhone'), notes: $('df-notes').value.trim(),
+    compRoof: v('compRoof'), compHvac: v('compHvac'), compPlumbing: v('compPlumbing'), compCosmetic: v('compCosmetic'),
     driveFolderUrl: v('driveFolderUrl'), headline: v('headline'),
     slug: (v('address') || '').replace(/[^a-zA-Z0-9]/g, ''),
     updatedAt: new Date().toISOString()
