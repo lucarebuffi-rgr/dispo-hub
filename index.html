@@ -834,12 +834,14 @@ async function openDeal(id) {
         const person = b ? [b.firstName, b.lastName].filter(Boolean).join(' ') : '';
         const addr = (b && b.boughtPropertyAddress) || pb.boughtPropertyAddress || pb.purchaseAddress || '';
         const price = (b && b.boughtPropertyPrice) || pb.boughtPropertyPrice || (pb.soldPrice ? String(pb.soldPrice) : '');
+        const email = (b && b.email) || '';
         return `
         <div class="match-row"${b ? ` onclick="openBuyer('${b.id}')" style="cursor:pointer;"` : ''}>
           <div class="match-info">
             <div class="n">🏆 ${esc(nm)}</div>
             ${person ? `<div class="w" style="color:#e8c476;">👤 ${esc(person)}</div>` : ''}
             <div class="w">${addr ? '📍 ' + esc(addr) : ''}${addr && price ? ' · ' : ''}${price ? '💰 ' + esc(price) : ''}${!addr && !price ? '—' : ''}</div>
+            ${email ? `<div class="w">✉️ <a href="mailto:${esc(email)}" onclick="event.stopPropagation()" style="color:#7fb3ff;">${esc(email)}</a></div>` : ''}
           </div>
           ${b && b.phone ? `<a class="call-link match-call" href="tel:${digitsOnly(b.phone)}" onclick="event.stopPropagation()">📞</a>` : `<span style="font-size:12px;color:#5c6b82;">${b ? 'no phone' : ''}</span>`}
         </div>`;
@@ -855,12 +857,14 @@ async function openDeal(id) {
         const person = b ? [b.firstName, b.lastName].filter(Boolean).join(' ') : '';
         const addr = (b && b.boughtPropertyAddress) || pb.boughtPropertyAddress || pb.purchaseAddress || '';
         const price = (b && b.boughtPropertyPrice) || pb.boughtPropertyPrice || (pb.soldPrice ? String(pb.soldPrice) : '');
+        const email = (b && b.email) || '';
         return `
         <div class="match-row"${b ? ` onclick="openBuyer('${b.id}')" style="cursor:pointer;"` : ''}>
           <div class="match-info">
             <div class="n">${esc(nm)}</div>
             ${person ? `<div class="w" style="color:#e8c476;">👤 ${esc(person)}</div>` : ''}
             <div class="w">${addr ? '📍 ' + esc(addr) : ''}${addr && price ? ' · ' : ''}${price ? '💰 ' + esc(price) : ''}${!addr && !price ? '—' : ''}</div>
+            ${email ? `<div class="w">✉️ <a href="mailto:${esc(email)}" onclick="event.stopPropagation()" style="color:#7fb3ff;">${esc(email)}</a></div>` : ''}
           </div>
           ${b && b.phone ? `<a class="call-link match-call" href="tel:${digitsOnly(b.phone)}" onclick="event.stopPropagation()">📞</a>` : `<span style="font-size:12px;color:#5c6b82;">${b ? 'no phone' : ''}</span>`}
         </div>`;
