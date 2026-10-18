@@ -880,7 +880,11 @@ async function openDeal(id) {
           <h2>${esc(d.address)}</h2>
           <div class="addr-sub">${esc(d.city || '')}${d.city ? ', ' : ''}${esc(d.state || 'GA')} ${esc(d.zip || '')}${d.county ? ' · ' + esc(d.county) + ' Co' : ''}</div>
         </div>
-        ${stageBadge(d.stage)}
+        <div style="display:flex;gap:8px;align-items:center;">
+          <button onclick="openOffersPopup('${d.id}')" title="Offers" style="background:rgba(200,147,42,0.15);border:1px solid rgba(200,147,42,0.4);border-radius:12px;width:44px;height:44px;font-size:22px;cursor:pointer;">💰</button>
+          <button onclick="openViewsPopup('${d.id}')" title="Page views" style="background:rgba(200,147,42,0.15);border:1px solid rgba(200,147,42,0.4);border-radius:12px;width:44px;height:44px;font-size:22px;cursor:pointer;">👁️</button>
+          ${stageBadge(d.stage)}
+        </div>
       </div>
       ${dl != null && !['closed', 'dead', 'assigned'].includes(d.stage) ? `<div class="${dl <= 7 ? 'urgent' : ''}" style="font-size:14px;margin-bottom:6px;">⏳ ${dl < 0 ? Math.abs(dl) + ' days PAST the close-by date' : dl + ' days to close-by date (' + esc(fmtDate(d.closeByDate)) + ')'}</div>` : ''}
       <div class="section-label">Numbers</div>
@@ -962,7 +966,10 @@ async function openDeal(id) {
     </div>
 
     <div class="detail-card">
-      <h2 style="font-size:18px;">📋 All Pulled Buyers <span style="color:#8a97a8;font-size:13px;font-weight:400;">(${otherPulled.length})</span></h2>
+      <h2 style="font-size:18px;cursor:pointer;user-select:none;" onclick="document.getElementById('all-buyers-list').style.display = document.getElementById('all-buyers-list').style.display === 'none' ? 'block' : 'none'; this.querySelector('.toggle-arrow').textContent = document.getElementById('all-buyers-list').style.display === 'none' ? '▶' : '▼';">
+        <span class="toggle-arrow">▶</span> 📋 All Pulled Buyers <span style="color:#8a97a8;font-size:13px;font-weight:400;">(${otherPulled.length})</span>
+      </h2>
+      <div id="all-buyers-list" style="display:none;">
       <div class="addr-sub">Every buyer from this deal's InvestorBase pulls.</div>
       ${otherPulled.length ? otherPulled.map(pb => {
         const b = pb._buyer;
@@ -982,6 +989,7 @@ async function openDeal(id) {
           ${b && b.phone ? `<a class="call-link match-call" href="tel:${digitsOnly(b.phone)}" onclick="event.stopPropagation()">📞</a>` : `<span style="font-size:12px;color:#5c6b82;">${b ? 'no phone' : ''}</span>`}
         </div>`;
       }).join('') : '<div class="timeline-empty">No other pulled buyers — tap 🔍 Search For Buyers above to run a pull.</div>'}
+      </div>
     </div>
 
     <div class="detail-card">
@@ -992,24 +1000,6 @@ async function openDeal(id) {
       <div style="display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:#8a97a8;margin-top:6px;">
         <span>📍 Deal</span><span>🟢 Entity / cash buyer</span><span>🔵 Individual</span><span>🟣 Trust</span><span>⚪ Other</span>
       </div>
-    </div>
-
-    <div class="detail-card">
-      <h2 style="font-size:18px;">💰 Offers <span style="color:#8a97a8;font-size:13px;font-weight:400;">(${offers.length})</span></h2>
-      <div id="offers-list">${offers.length ? offers.map(o => `
-        <div class="match-row">
-          <div class="match-info">
-            <div class="n">${money(o.amount)} <span style="font-weight:400;color:#8a97a8;">— ${esc(o.buyerName || 'Unknown buyer')}</span></div>
-            <div class="w">${o.emd ? 'EMD ' + money(o.emd) + ' · ' : ''}${o.closeDate ? 'Close ' + esc(fmtDate(o.closeDate)) + ' · ' : ''}${esc(o.status || 'pending')}${o.notes ? ' · ' + esc(o.notes) : ''}</div>
-          </div>
-          <button class="btn-ghost" style="padding:6px 10px;min-height:0;" onclick="event.stopPropagation();armConfirm(this, () => deleteOffer('${d.id}','${o.id}'))">✕</button>
-        </div>`).join('') : '<div class="timeline-empty">No offers yet.</div>'}</div>
-      <button class="btn-gold" style="margin-top:10px;" onclick="showOfferForm('${d.id}')">+ Log Offer</button>
-    </div>
-
-    <div class="detail-card">
-      <h2 style="font-size:18px;">👁️ Page Views <span style="color:#8a97a8;font-size:13px;font-weight:400;" id="views-count"></span></h2>
-      <div id="views-list"><div class="timeline-empty">Loading views…</div></div>
     </div>
 
     <div class="detail-card">
@@ -1028,62 +1018,6 @@ async function openDeal(id) {
   if (d.driveFolderUrl && editingDriveFor !== d.id) {
     fetchDrivePhotos(d.id, d.driveFolderUrl);
     fetchDriveFolderName(d.id, d.driveFolderUrl);
-  }
-  loadDealViews(id);
-}
-async function loadDealViews(dealId) {
-  const listEl = document.getElementById('views-list');
-  const countEl = document.getElementById('views-count');
-  if (!listEl) return;
-  try {
-    const snap = await db.collection('dispoPageViews').where('dealId', '==', dealId).get();
-    const views = snap.docs.map(v => ({ id: v.id, ...v.data() }));
-    const pageViews = views.filter(v => v.type === 'view');
-    const timeEvents = views.filter(v => v.type === 'time');
-    const clicks = views.filter(v => v.type === 'click');
-    // Group by session
-    const sessions = {};
-    pageViews.forEach(v => {
-      const s = v.sessionId || 'unknown';
-      if (!sessions[s]) sessions[s] = { buyerId: v.buyerId, views: 0, time: 0, clicks: [] };
-      sessions[s].views++;
-      if (v.buyerId && !sessions[s].buyerId) sessions[s].buyerId = v.buyerId;
-    });
-    timeEvents.forEach(v => {
-      const s = v.sessionId || 'unknown';
-      if (sessions[s]) sessions[s].time += (+v.seconds || 0);
-    });
-    clicks.forEach(v => {
-      const s = v.sessionId || 'unknown';
-      if (sessions[s]) sessions[s].clicks.push(v.action);
-    });
-    const sessionList = Object.values(sessions).sort((a, b) => b.views - a.views);
-    const totalTime = timeEvents.reduce((sum, v) => sum + (+v.seconds || 0), 0);
-    const avgTime = pageViews.length ? Math.round(totalTime / pageViews.length) : 0;
-    if (countEl) countEl.textContent = `(${pageViews.length} views · ${Object.keys(sessions).length} visitors · ~${avgTime}s avg)`;
-    if (!sessionList.length) {
-      listEl.innerHTML = '<div class="timeline-empty">No views yet. Share the deal link to start tracking.</div>';
-      return;
-    }
-    // Resolve buyer names
-    const buyerIds = [...new Set(sessionList.map(s => s.buyerId).filter(Boolean))];
-    const buyerMap = {};
-    for (const bid of buyerIds) {
-      try {
-        const bdoc = await db.collection('dispoBuyers').doc(bid).get();
-        if (bdoc.exists) buyerMap[bid] = bdoc.data().name || 'Unknown';
-      } catch (e) {}
-    }
-    listEl.innerHTML = sessionList.slice(0, 20).map(s => {
-      const name = s.buyerId ? (buyerMap[s.buyerId] || 'Unknown buyer') : 'Anonymous';
-      const timeStr = s.time > 60 ? Math.round(s.time / 60) + 'm' : s.time + 's';
-      const actions = [...new Set(s.clicks)].join(', ') || 'browsed';
-      const hot = s.time > 120 || s.views > 2 || s.clicks.includes('offer_submit_attempt') ? ' 🔥' : '';
-      return `<div class="match-row"><div class="match-info"><div class="n">${esc(name)}${hot}</div><div class="w">${s.views} view${s.views > 1 ? 's' : ''} · ${timeStr} · ${esc(actions)}</div></div></div>`;
-    }).join('');
-  } catch (e) {
-    console.error('views load failed', e);
-    listEl.innerHTML = '<div class="timeline-empty">Could not load views.</div>';
   }
 }
 async function deleteOffer(dealId, offerId) {
@@ -2934,6 +2868,79 @@ async function ddResumeBuyer(id) {
   }
 }
 
+</script>
+
+<!-- Soft popup modals for Offers and Views -->
+<div id="popup-overlay" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.6);backdrop-filter:blur(4px);z-index:1000;align-items:center;justify-content:center;padding:20px;" onclick="if(event.target===this)closePopup()">
+  <div id="popup-content" style="background:linear-gradient(180deg,#1e3a5f,#182c49);border:1px solid #2a4a73;border-radius:18px;max-width:560px;width:100%;max-height:80vh;overflow-y:auto;padding:24px;box-shadow:0 24px 64px rgba(0,0,0,0.4);"></div>
+</div>
+<script>
+function closePopup() {
+  document.getElementById('popup-overlay').style.display = 'none';
+}
+async function openOffersPopup(dealId) {
+  const d = deals.find(x => x.id === dealId);
+  if (!d) return;
+  const overlay = document.getElementById('popup-overlay');
+  const content = document.getElementById('popup-content');
+  content.innerHTML = '<h2 style="font-size:20px;margin-bottom:16px;">💰 Offers</h2><div class="timeline-empty">Loading…</div>';
+  overlay.style.display = 'flex';
+  try {
+    const snap = await db.collection('dispoOffers').where('dealId', '==', dealId).get();
+    const offers = snap.docs.map(o => ({ id: o.id, ...o.data() })).sort((a, b) => (+b.amount || +b.offerAmount || 0) - (+a.amount || +a.offerAmount || 0));
+    content.innerHTML = '<h2 style="font-size:20px;margin-bottom:16px;">💰 Offers <span style="color:#8a97a8;font-size:14px;">(' + offers.length + ')</span></h2>' +
+      (offers.length ? offers.map(o => {
+        const amt = o.amount || o.offerAmount || 0;
+        return '<div class="match-row"><div class="match-info"><div class="n">' + money(amt) + ' <span style="font-weight:400;color:#8a97a8;">— ' + esc(o.buyerName || 'Unknown') + '</span></div>' +
+          '<div class="w">' + esc(o.status || 'pending') + (o.notes ? ' · ' + esc(o.notes) : '') + '</div></div>' +
+          '<button class="btn-ghost" style="padding:6px 10px;min-height:0;" onclick="event.stopPropagation();armConfirm(this,()=>deleteOffer(\'' + dealId + '\',\'' + o.id + '\'))">✕</button></div>';
+      }).join('') : '<div class="timeline-empty">No offers yet.</div>') +
+      '<button class="btn-gold" style="margin-top:12px;width:100%;" onclick="closePopup();showOfferForm(\'' + dealId + '\')">+ Log Offer</button>';
+  } catch (e) {
+    content.innerHTML = '<h2>💰 Offers</h2><div class="timeline-empty">Could not load.</div>';
+  }
+}
+async function openViewsPopup(dealId) {
+  const overlay = document.getElementById('popup-overlay');
+  const content = document.getElementById('popup-content');
+  content.innerHTML = '<h2 style="font-size:20px;margin-bottom:16px;">👁️ Page Views</h2><div class="timeline-empty">Loading…</div>';
+  overlay.style.display = 'flex';
+  try {
+    const snap = await db.collection('dispoPageViews').where('dealId', '==', dealId).get();
+    const views = snap.docs.map(v => ({ id: v.id, ...v.data() }));
+    const pageViews = views.filter(v => v.type === 'view');
+    const timeEvents = views.filter(v => v.type === 'time');
+    const clicks = views.filter(v => v.type === 'click');
+    const sessions = {};
+    pageViews.forEach(v => {
+      const s = v.sessionId || 'unknown';
+      if (!sessions[s]) sessions[s] = { buyerId: v.buyerId, views: 0, time: 0, clicks: [] };
+      sessions[s].views++;
+      if (v.buyerId && !sessions[s].buyerId) sessions[s].buyerId = v.buyerId;
+    });
+    timeEvents.forEach(v => { const s = v.sessionId || 'unknown'; if (sessions[s]) sessions[s].time += (+v.seconds || 0); });
+    clicks.forEach(v => { const s = v.sessionId || 'unknown'; if (sessions[s]) sessions[s].clicks.push(v.action); });
+    const sessionList = Object.values(sessions).sort((a, b) => b.views - a.views);
+    const totalTime = timeEvents.reduce((sum, v) => sum + (+v.seconds || 0), 0);
+    const avgTime = pageViews.length ? Math.round(totalTime / pageViews.length) : 0;
+    const buyerIds = [...new Set(sessionList.map(s => s.buyerId).filter(Boolean))];
+    const buyerMap = {};
+    for (const bid of buyerIds) {
+      try { const bdoc = await db.collection('dispoBuyers').doc(bid).get(); if (bdoc.exists) buyerMap[bid] = bdoc.data().name || 'Unknown'; } catch (e) {}
+    }
+    content.innerHTML = '<h2 style="font-size:20px;margin-bottom:8px;">👁️ Page Views</h2>' +
+      '<div style="color:#8a97a8;font-size:13px;margin-bottom:16px;">' + pageViews.length + ' views · ' + Object.keys(sessions).length + ' visitors · ~' + avgTime + 's avg</div>' +
+      (sessionList.length ? sessionList.slice(0, 20).map(s => {
+        const name = s.buyerId ? (buyerMap[s.buyerId] || 'Unknown buyer') : 'Anonymous';
+        const timeStr = s.time > 60 ? Math.round(s.time / 60) + 'm' : s.time + 's';
+        const actions = [...new Set(s.clicks)].join(', ') || 'browsed';
+        const hot = s.time > 60 || s.views > 2 || s.clicks.includes('offer_submit_attempt') ? ' 🔥' : '';
+        return '<div class="match-row"><div class="match-info"><div class="n">' + esc(name) + hot + '</div><div class="w">' + s.views + ' view' + (s.views > 1 ? 's' : '') + ' · ' + timeStr + ' · ' + esc(actions) + '</div></div></div>';
+      }).join('') : '<div class="timeline-empty">No views yet. Share the deal link to start tracking.</div>');
+  } catch (e) {
+    content.innerHTML = '<h2>👁️ Page Views</h2><div class="timeline-empty">Could not load.</div>';
+  }
+}
 </script>
 </body>
 </html>
