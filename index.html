@@ -735,6 +735,8 @@ function showDealForm(dealId, searchId) {
         ${fld('sellerName', 'Seller name', d.sellerName)}
         ${fld('sellerPhone', 'Seller phone', d.sellerPhone, 'tel')}
       </div>
+      <div class="section-label">Marketing</div>
+      <div class="form-field"><label>Listing headline (shows on the deal landing page — e.g. "3/1 ready for conversion to 3/2")</label><input type="text" id="df-headline" value="${esc(d.headline || '')}" placeholder="Leave blank to use the street address"></div>
       <div class="section-label">Notes</div>
       <div class="form-field"><textarea id="df-notes" placeholder="Condition, access, showing instructions…">${esc(d.notes || '')}</textarea></div>
       <div class="section-label">Photos</div>
@@ -759,7 +761,7 @@ async function saveDealForm(id) {
     contractPrice: num('contractPrice'), arv: num('arv'), repairEst: num('repairEst'),
     askPrice: num('askPrice'), assignmentFee: num('assignmentFee'), closeByDate: v('closeByDate'),
     sellerName: v('sellerName'), sellerPhone: v('sellerPhone'), notes: $('df-notes').value.trim(),
-    driveFolderUrl: v('driveFolderUrl'),
+    driveFolderUrl: v('driveFolderUrl'), headline: v('headline'),
     updatedAt: new Date().toISOString()
   };
   if (!rec.address) { showToast('Address is required'); return; }
@@ -2072,7 +2074,7 @@ const BLAST_PACE_MS = 90000; // 1 email every 90 seconds
 const LUCA_PHONE_DISPO = '(469) 606-3358';
 const LUCA_MAIL_ADDR = '1185 Fossett Rd, Concord, GA 30206';
 
-function dealLandingURL(deal) { return location.origin + location.pathname + '?deal=' + deal.id; }
+function dealLandingURL(deal) { return 'https://www.royalgroupsrealty.com/deals/' + deal.id; }
 function personFirstName(buyer) {
   const fn = ((buyer && buyer.firstName) || '').trim();
   if (fn) return fn;
@@ -2110,36 +2112,36 @@ function defaultEmailBody() {
 function dealEmailInner(deal, bodyText, photoURL) {
   const link = dealLandingURL(deal);
   const paras = String(bodyText).split(/\n{2,}/).map(p => p.trim()).filter(Boolean);
-  const ctaBtn = '<div style="text-align:center;margin:20px 0 8px;"><a href="' + link + '" style="display:inline-block;background:#d4a843;color:#0a1423;font-weight:800;font-size:17px;padding:15px 40px;border-radius:12px;text-decoration:none;">View the Deal &rarr;</a></div>';
+  const ctaBtn = '<div style="text-align:center;margin:20px 0 8px;"><a href="' + link + '" style="display:inline-block;background:#8a5c14;color:#ffffff;font-weight:800;font-size:17px;padding:15px 40px;border-radius:6px;text-decoration:none;">View the Deal &rarr;</a></div>';
   const htmlParas = paras.map(p => {
-    if (/^---+$/.test(p)) return '<div style="border-top:1px solid #22385a;margin:20px 0;"></div>';
+    if (/^---+$/.test(p)) return '<div style="border-top:1px solid #e5e7eb;margin:20px 0;"></div>';
     let h = esc(p).replace(/\n/g, '<br />');
     if (p.indexOf(link) !== -1) {
       h = h.split(esc(link)).join('');
-      return '<div style="margin:0 0 14px;font-size:15px;line-height:1.65;color:#dbe3ee;">' + h + '</div>' + ctaBtn +
-        '<div style="text-align:center;font-size:11px;color:#8a97a8;word-break:break-all;margin-bottom:6px;"><a href="' + link + '" style="color:#7fb3ff;">' + esc(link) + '</a></div>';
+      return '<div style="margin:0 0 14px;font-size:15px;line-height:1.65;color:#374151;">' + h + '</div>' + ctaBtn +
+        '<div style="text-align:center;font-size:11px;color:#6b7280;word-break:break-all;margin-bottom:6px;"><a href="' + link + '" style="color:#8a5c14;">' + esc(link) + '</a></div>';
     }
-    return '<div style="margin:0 0 14px;font-size:15px;line-height:1.65;color:#dbe3ee;">' + h + '</div>';
+    return '<div style="margin:0 0 14px;font-size:15px;line-height:1.65;color:#374151;">' + h + '</div>';
   }).join('');
   return '<table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td align="center">' +
-    '<table role="presentation" width="600" cellpadding="0" cellspacing="0" style="width:100%;max-width:600px;background:#101f36;border:1px solid #22385a;border-radius:16px;">' +
-    '<tr><td style="background:#16294a;padding:22px 24px;text-align:center;border-radius:16px 16px 0 0;">' +
-    '<div style="font-size:11px;letter-spacing:3px;color:#d4a843;font-weight:700;">DISPO HUB &middot; ROYAL GROUPS REALTY</div>' +
-    '<div style="font-size:21px;font-weight:800;color:#ffffff;margin-top:8px;">' + esc(deal.address || '') + '</div>' +
-    '<div style="color:#aeb9c7;font-size:14px;margin-top:2px;">' + esc(deal.city || '') + (deal.city ? ', ' : '') + esc(deal.state || 'GA') + ' ' + esc(deal.zip || '') + '</div></td></tr>' +
+    '<table role="presentation" width="600" cellpadding="0" cellspacing="0" style="width:100%;max-width:600px;background:#ffffff;border:1px solid #e5e7eb;border-radius:12px;">' +
+    '<tr><td style="background:#0d1b2a;padding:24px;text-align:center;border-radius:12px 12px 0 0;">' +
+    '<div style="font-size:11px;letter-spacing:3px;color:#e8b84b;font-weight:700;">OFF-MARKET INVESTMENT OPPORTUNITY</div>' +
+    '<div style="font-family:Georgia,serif;font-size:24px;font-weight:800;color:#ffffff;margin-top:10px;">' + esc(deal.headline || deal.address || '') + '</div>' +
+    '<div style="color:rgba(255,255,255,0.7);font-size:14px;margin-top:4px;">' + esc(deal.city || '') + (deal.city ? ', ' : '') + esc(deal.state || 'GA') + ' ' + esc(deal.zip || '') + '</div></td></tr>' +
     (photoURL ? '<tr><td><img src="' + photoURL + '" alt="" style="width:100%;display:block;" /></td></tr>' : '') +
     '<tr><td style="padding:20px 24px;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>' +
-    '<td width="40%" valign="top"><div style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:#8a97a8;">Asking</div><div style="font-size:25px;font-weight:800;color:#4caf82;">' + money(deal.askPrice) + '</div></td>' +
-    '<td width="35%" valign="top"><div style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:#8a97a8;">ARV</div><div style="font-size:20px;font-weight:800;color:#e8c476;">' + money(deal.arv) + '</div></td>' +
-    '<td width="25%" valign="top"><div style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:#8a97a8;">Beds / Baths</div><div style="font-size:15px;font-weight:700;color:#dbe3ee;">' + esc(deal.beds || '—') + ' / ' + esc(deal.baths || '—') + '</div></td>' +
+    '<td width="40%" valign="top"><div style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:#6b7280;">Asking Price</div><div style="font-family:Georgia,serif;font-size:26px;font-weight:800;color:#16a34a;">' + money(deal.askPrice) + '</div></td>' +
+    '<td width="35%" valign="top"><div style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:#6b7280;">ARV</div><div style="font-family:Georgia,serif;font-size:21px;font-weight:800;color:#0d1b2a;">' + money(deal.arv) + '</div></td>' +
+    '<td width="25%" valign="top"><div style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:#8a97a8;">Beds / Baths</div><div style="font-size:15px;font-weight:700;color:#374151;">' + esc(deal.beds || '—') + ' / ' + esc(deal.baths || '—') + '</div></td>' +
     '</tr></table></td></tr>' +
     '<tr><td style="padding:4px 24px 20px;">' + htmlParas + '</td></tr>' +
-    '<tr><td style="padding:16px 24px;border-top:1px solid #22385a;text-align:center;border-radius:0 0 16px 16px;">' +
-    '<div style="font-size:12px;color:#5c6b82;line-height:1.7;">Luca Rebuffi &middot; Royal Groups Realty<br />' + LUCA_PHONE_DISPO + ' &middot; luca.rebuffi@royalgroupsrealty.com<br />' + LUCA_MAIL_ADDR + '</div></td></tr>' +
+    '<tr><td style="padding:16px 24px;border-top:1px solid #e5e7eb;text-align:center;border-radius:0 0 16px 16px;">' +
+    '<div style="font-size:12px;color:#6b7280;line-height:1.7;">Luca Rebuffi &middot; Royal Groups Realty<br />' + '(469) 665-8481' + ' &middot; luca.rebuffi@royalgroupsrealty.com<br />' + LUCA_MAIL_ADDR + '</div></td></tr>' +
     '</table></td></tr></table>';
 }
 function dealEmailHTML(deal, bodyText, photoURL) {
-  return '<!DOCTYPE html><html><head><meta charset="UTF-8" /></head><body style="margin:0;padding:0;background:#0a1423;"><div style="background:#0a1423;padding:24px 12px;">' + dealEmailInner(deal, bodyText, photoURL) + '</div></body></html>';
+  return '<!DOCTYPE html><html><head><meta charset="UTF-8" /></head><body style="margin:0;padding:0;background:#faf8f3;"><div style="background:#faf8f3;padding:24px 12px;">' + dealEmailInner(deal, bodyText, photoURL) + '</div></body></html>';
 }
 async function dealPhotoURLs(deal) {
   if (!deal || !deal.driveFolderUrl) return [];
@@ -2155,19 +2157,20 @@ async function dealPhotoURLs(deal) {
 function buildShotCard(deal, photoURL) {
   let el = document.getElementById('email-shot');
   if (!el) { el = document.createElement('div'); el.id = 'email-shot'; el.style.cssText = 'position:fixed;left:-10000px;top:0;width:600px;'; document.body.appendChild(el); }
+  const headline = deal.headline || deal.address || '';
   el.innerHTML =
-    '<div style="width:600px;background:#0d1b2e;font-family:Arial,sans-serif;overflow:hidden;">' +
-    '<div style="background:linear-gradient(135deg,#1e3a5f,#16294a);padding:26px;text-align:center;">' +
-    '<div style="font-size:11px;letter-spacing:4px;color:#d4a843;font-weight:700;">DISPO HUB</div>' +
-    '<div style="font-size:15px;color:#8a97a8;margin-top:6px;">Off-Market Investment Opportunity</div></div>' +
+    '<div style="width:600px;background:#faf8f3;font-family:Arial,sans-serif;overflow:hidden;">' +
+    '<div style="background:linear-gradient(135deg,#0d1b2a,#1a3050);padding:28px 30px;">' +
+    '<div style="font-size:11px;letter-spacing:4px;color:#e8b84b;font-weight:700;">OFF-MARKET INVESTMENT OPPORTUNITY</div>' +
+    '<div style="font-family:Georgia,serif;font-size:30px;font-weight:800;color:#ffffff;margin-top:10px;line-height:1.2;">' + esc(headline) + '</div>' +
+    '<div style="color:rgba(255,255,255,0.7);font-size:14px;margin-top:6px;">' + esc(deal.address || '') + ' · ' + esc(deal.city || '') + (deal.city ? ', ' : '') + esc(deal.state || 'GA') + ' ' + esc(deal.zip || '') + '</div></div>' +
     (photoURL ? '<img src="' + photoURL + '" crossorigin="anonymous" style="width:600px;height:340px;object-fit:cover;display:block;" />' : '') +
-    '<div style="padding:26px;">' +
-    '<div style="font-size:26px;font-weight:800;color:#ffffff;">' + esc(deal.address || '') + '</div>' +
-    '<div style="color:#aeb9c7;font-size:15px;margin-top:4px;">' + esc(deal.city || '') + (deal.city ? ', ' : '') + esc(deal.state || 'GA') + ' ' + esc(deal.zip || '') + '</div>' +
-    '<div style="margin-top:18px;"><div style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:#8a97a8;">Asking</div><div style="font-size:32px;font-weight:800;color:#4caf82;">' + money(deal.askPrice) + '</div></div>' +
-    '<div style="margin-top:6px;"><div style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:#8a97a8;">ARV</div><div style="font-size:24px;font-weight:800;color:#e8c476;">' + money(deal.arv) + '</div></div>' +
-    '<div style="margin-top:14px;font-size:14px;color:#aeb9c7;">Beds: ' + esc(deal.beds || '—') + ' &nbsp;·&nbsp; Baths: ' + esc(deal.baths || '—') + ' &nbsp;·&nbsp; Sqft: ' + (deal.sqft ? (+deal.sqft).toLocaleString() : '—') + '</div>' +
-    '<div style="margin-top:22px;text-align:center;"><span style="display:inline-block;background:#d4a843;color:#0a1423;font-weight:800;font-size:17px;padding:14px 40px;border-radius:12px;">View the Deal</span></div>' +
+    '<div style="padding:26px 30px;">' +
+    '<div style="font-size:11px;text-transform:uppercase;letter-spacing:2px;color:#8a5c14;font-weight:700;">Asking Price</div>' +
+    '<div style="font-family:Georgia,serif;font-size:40px;font-weight:800;color:#16a34a;">' + money(deal.askPrice) + '</div>' +
+    '<div style="margin-top:8px;font-size:14px;color:#6b7280;">ARV ' + money(deal.arv) + ' &nbsp;·&nbsp; ' + esc(deal.beds || '—') + ' bd &nbsp;·&nbsp; ' + esc(deal.baths || '—') + ' ba &nbsp;·&nbsp; ' + (deal.sqft ? (+deal.sqft).toLocaleString() + ' sq ft' : '—') + '</div>' +
+    '<div style="margin-top:22px;text-align:center;"><span style="display:inline-block;background:#8a5c14;color:#ffffff;font-weight:800;font-size:17px;padding:14px 44px;border-radius:6px;">View the Deal</span></div>' +
+    '<div style="margin-top:18px;text-align:center;font-size:12px;color:#6b7280;">Royal Groups Realty · (469) 665-8481</div>' +
     '</div></div>';
   return el;
 }
@@ -2177,7 +2180,7 @@ async function dealPreviewPNG(deal) {
   const imgs = el.querySelectorAll('img');
   await Promise.all(Array.from(imgs).map(img => img.complete ? Promise.resolve() : new Promise(res => { img.onload = res; img.onerror = res; setTimeout(res, 5000); })));
   await new Promise(r => setTimeout(r, 300));
-  const canvas = await html2canvas(el, { scale: 2, useCORS: true, backgroundColor: '#0d1b2e' });
+  const canvas = await html2canvas(el, { scale: 2, useCORS: true, backgroundColor: '#faf8f3' });
   return canvas.toDataURL('image/png').split(',')[1];
 }
 async function dealPulledBuyers(dealId) {
