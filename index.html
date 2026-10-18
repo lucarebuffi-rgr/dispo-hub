@@ -762,6 +762,7 @@ async function saveDealForm(id) {
     askPrice: num('askPrice'), assignmentFee: num('assignmentFee'), closeByDate: v('closeByDate'),
     sellerName: v('sellerName'), sellerPhone: v('sellerPhone'), notes: $('df-notes').value.trim(),
     driveFolderUrl: v('driveFolderUrl'), headline: v('headline'),
+    slug: (v('address') || '').replace(/[^a-zA-Z0-9]/g, ''),
     updatedAt: new Date().toISOString()
   };
   if (!rec.address) { showToast('Address is required'); return; }
@@ -2075,7 +2076,8 @@ const BLAST_PACE_MS = 90000; // 1 email every 90 seconds
 const LUCA_PHONE_DISPO = '(469) 606-3358';
 const LUCA_MAIL_ADDR = '1185 Fossett Rd, Concord, GA 30206';
 
-function dealLandingURL(deal) { return 'https://www.royalgroupsrealty.com/deals/' + deal.id; }
+function dealSlug(deal) { return String(deal.slug || '').trim() || String(deal.address || '').replace(/[^a-zA-Z0-9]/g, '') || deal.id; }
+function dealLandingURL(deal) { return 'https://www.royalgroupsrealty.com/' + dealSlug(deal); }
 function personFirstName(buyer) {
   const fn = ((buyer && buyer.firstName) || '').trim();
   if (fn) return fn;
