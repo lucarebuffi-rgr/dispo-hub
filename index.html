@@ -2388,8 +2388,12 @@ async function openEmailBlast(dealId) {
   ensureGmailAuth().catch(e => console.warn('gmail pre-auth:', e.message));
   showToast('Loading buyers…');
   let pulled = [];
-  try { pulled = await dealPulledBuyers(dealId); } catch (e) { showToast('Could not load buyers'); return; }
-  const withEmail = pulled.filter(r => r._buyer && r._buyer.email && r._buyer.status !== 'inactive');
+  let contacted = new Map();
+  try { [pulled, contacted] = await Promise.all([dealPulledBuyers(dealId), contactedBuyerIds(dealId, 'dispoEmailBlasts')]); }
+  catch (e) { showToast('Could not load buyers'); return; }
+  const withEmailAll = pulled.filter(r => r._buyer && r._buyer.email && r._buyer.status !== 'inactive');
+  const alreadyEmailed = withEmailAll.filter(r => contacted.has(r._buyer.id)).length;
+  const withEmail = withEmailAll.filter(r => !contacted.has(r._buyer.id));
   const top = withEmail.filter(r => r.smartMatch === true);
   blastRun = null;
   closeEmailOverlay();
@@ -2405,7 +2409,9 @@ async function openEmailBlast(dealId) {
         <div class="section-label" style="margin-top:0;">Recipients</div>
         ${top.length ? `<label style="display:block;font-size:14px;margin-bottom:8px;"><input type="radio" name="eb-group" value="top" checked /> 🏆 Top Ranked with email (${top.length})</label>` : ''}
         <label style="display:block;font-size:14px;margin-bottom:4px;"><input type="radio" name="eb-group" value="all" ${top.length ? '' : 'checked'} /> 📋 All pulled buyers with email (${withEmail.length})</label>
-        ${!withEmail.length ? '<div style="color:#e07a77;font-size:13px;margin-top:8px;">No buyers with email addresses on this deal yet.</div>' : ''}
+        ${!withEmailAll.length ? '<div style="color:#e07a77;font-size:13px;margin-top:8px;">No buyers with email addresses on this deal yet.</div>' : ''}
+        ${alreadyEmailed ? `<div style="color:#e8b84b;font-size:13px;margin-top:8px;">⏭ ${alreadyEmailed} buyer${alreadyEmailed === 1 ? '' : 's'} already emailed for this deal — skipped.</div>` : ''}
+        ${withEmailAll.length && !withEmail.length ? '<div style="color:#e07a77;font-size:13px;margin-top:8px;">Everyone with an email was already emailed for this deal.</div>' : ''}
       </div>
       <div class="detail-card">
         <div class="section-label" style="margin-top:0;">Subject</div>
@@ -2465,6 +2471,9 @@ async function startBlast(dealId) {
   try { pulled = await dealPulledBuyers(dealId); } catch (e) { showToast('Could not load buyers'); return; }
   let recips = pulled.filter(r => r._buyer && r._buyer.email && r._buyer.status !== 'inactive');
   if (group === 'top') recips = recips.filter(r => r.smartMatch === true);
+  // Safety net: never re-email a buyer already emailed for this deal (e.g. via a one-off email).
+  const contactedNow = await contactedBuyerIds(dealId, 'dispoEmailBlasts');
+  recips = recips.filter(r => !contactedNow.has(r._buyer.id));
   if (!recips.length) { showToast('No recipients in this group'); return; }
   const mins = Math.ceil(recips.length * 1.5);
   if (!confirm('Send ' + recips.length + ' emails, one every 90 seconds (~' + mins + ' min)?\n\nKeep DispoHub open until it finishes.')) return;
@@ -2473,7 +2482,7 @@ async function startBlast(dealId) {
   const subjTpl = ($('eb-subject') || {}).value || defaultEmailSubject();
   const bodyTpl = ($('eb-body') || {}).value || defaultEmailBody();
   blastRun = { cancel: false, finished: false };
-  let ok = 0, fail = 0; const logArr = [];
+  let ok = 0, fail = 0; const logArr = []; const sentIds = [];
   const pushLog = line => { logArr.push(line); if (logArr.length > 60) logArr.shift(); };
   const renderProg = (done, note) => {
     if (!prog) return;
@@ -2499,9 +2508,9 @@ async function startBlast(dealId) {
     const bodyFilled = fillBody(bodyTpl, d, b);
     try {
       await sendDealEmail(b.email, fillSubject(subjTpl, d, b), bodyFilled, dealEmailHTML(d, bodyFilled, photoURL), atts);
-      ok++; pushLog('✅ ' + (i + 1) + '/' + recips.length + ' ' + b.email);
+      ok++; sentIds.push(b.id); pushLog('✅ ' + (i + 1) + '/' + recips.length + ' ' + b.email);
     } catch (e) { fail++; pushLog('❌ ' + (i + 1) + '/' + recips.length + ' ' + b.email + ' — ' + e.message); }
-    if (blastRef) blastRef.set({ sent: ok, failed: fail }, { merge: true }).catch(() => {});
+    if (blastRef) blastRef.set({ sent: ok, failed: fail, buyerIds: sentIds }, { merge: true }).catch(() => {});
     renderProg(i + 1, i < recips.length - 1 ? '' : 'Finishing…');
     if (i < recips.length - 1 && blastRun && !blastRun.cancel) await paceCountdown(BLAST_PACE_MS);
   }
@@ -2512,9 +2521,21 @@ async function startBlast(dealId) {
   showToast(cancelled ? 'Blast cancelled' : 'Blast done: ' + ok + ' sent' + (fail ? ', ' + fail + ' failed' : ''));
 }
 function cancelBlast() { if (blastRun) blastRun.cancel = true; showToast('Cancelling after the current email…'); }
+let singleEmailBuyerId = null;
+async function checkSingleEmailDup() {
+  const w = document.getElementById('se-dupwarn'); if (!w) return;
+  const dealId = ($('se-deal') || {}).value || '';
+  if (!dealId || !singleEmailBuyerId) { w.innerHTML = ''; return; }
+  const contacted = await contactedBuyerIds(dealId, 'dispoEmailBlasts');
+  const at = contacted.get(singleEmailBuyerId);
+  w.innerHTML = at
+    ? '<div style="font-size:13px;color:#e8b84b;background:#2a2113;border:1px solid #6b5416;border-radius:8px;padding:8px 10px;">⚠️ Already emailed' + (at ? ' on ' + esc(shortDate(at)) : '') + ' for this deal — sending again will email them twice.</div>'
+    : '';
+}
 async function openSingleEmail(buyerId) {
   const b = buyers.find(x => x.id === buyerId);
   if (!b || !b.email) { showToast('No email on this buyer'); return; }
+  singleEmailBuyerId = buyerId;
   ensureGmailAuth().catch(e => console.warn('gmail pre-auth:', e.message));
   const opts = deals.filter(dd => !['dead', 'closed'].includes(dd.stage))
     .map(dd => '<option value="' + dd.id + '">' + esc(dd.address) + '</option>').join('');
@@ -2530,7 +2551,8 @@ async function openSingleEmail(buyerId) {
       <div style="font-size:13px;color:#8a97a8;margin-bottom:14px;">To: ${esc(b.email)} · from luca.rebuffi@royalgroupsrealty.com</div>
       <div class="detail-card">
         <div class="section-label" style="margin-top:0;">Deal</div>
-        <select id="se-deal" style="width:100%;padding:12px;border-radius:10px;border:1px solid #22385a;background:#0b1626;color:#e9edf3;font-size:15px;">${opts}</select>
+        <select id="se-deal" onchange="checkSingleEmailDup()" style="width:100%;padding:12px;border-radius:10px;border:1px solid #22385a;background:#0b1626;color:#e9edf3;font-size:15px;">${opts}</select>
+        <div id="se-dupwarn" style="margin-top:8px;"></div>
         <div class="section-label">Subject</div>
         <input id="se-subject" style="width:100%;padding:12px;border-radius:10px;border:1px solid #22385a;background:#0b1626;color:#e9edf3;font-size:15px;" value="${esc(defaultEmailSubject())}" />
         <div class="section-label">Message</div>
@@ -2540,6 +2562,7 @@ async function openSingleEmail(buyerId) {
       <button class="btn-gold" id="se-send" style="width:100%;min-height:56px;" onclick="sendSingleEmail('${b.id}')">🚀 Send Now</button>
     </div>
   </div>`);
+  checkSingleEmailDup();
   window.scrollTo(0, 0);
 }
 async function sendSingleEmail(buyerId) {
@@ -2565,6 +2588,120 @@ async function sendSingleEmail(buyerId) {
     if (btn) { btn.disabled = false; btn.textContent = '🚀 Send Now'; }
   }
 }
+/* ---------------- Blast duplicate prevention ---------------- */
+// Map of buyerId -> latest ISO timestamp they were contacted for this deal,
+// from bulk blasts (buyerIds arrays) and one-off sends (buyerId field).
+// Older blasts logged before buyerIds tracking only carry counts — those can't be excluded.
+async function contactedBuyerIds(dealId, coll) {
+  const map = new Map();
+  try {
+    const snap = await db.collection(coll).where('dealId', '==', dealId).get();
+    snap.forEach(doc => {
+      const x = doc.data() || {};
+      const at = x.finishedAt || x.startedAt || '';
+      const add = bid => { if (bid && (!map.has(bid) || String(at) > String(map.get(bid)))) map.set(bid, at); };
+      if (Array.isArray(x.buyerIds)) x.buyerIds.forEach(add);
+      else if (x.buyerId) add(x.buyerId);
+    });
+  } catch (e) { console.warn('contactedBuyerIds failed for ' + coll + ':', e.message); }
+  return map;
+}
+function shortDate(iso) {
+  try { const d = new Date(iso); return isNaN(d) ? '' : d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }); }
+  catch (e) { return ''; }
+}
+let singleSmsBuyerId = null;
+let singleSmsLastFilled = '';
+async function openSingleSms(buyerId) {
+  const b = buyers.find(x => x.id === buyerId);
+  if (!b || !b.phone) { showToast('No phone on this buyer'); return; }
+  singleSmsBuyerId = buyerId;
+  const opts = deals.filter(dd => !['dead', 'closed'].includes(dd.stage))
+    .map(dd => '<option value="' + dd.id + '">' + esc(dd.address) + '</option>').join('');
+  smsRun = null;
+  closeSmsOverlay();
+  document.body.insertAdjacentHTML('beforeend', `
+  <div id="sms-blast" style="position:fixed;inset:0;z-index:3000;background:rgba(4,10,20,.94);overflow-y:auto;">
+    <div style="max-width:640px;margin:0 auto;padding:18px 16px 60px;">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
+        <div style="font-size:18px;font-weight:800;">📱 Text Buyer</div>
+        <button class="btn-ghost" onclick="closeSmsOverlay()">✕</button>
+      </div>
+      <div id="ss-sub" style="font-size:13px;color:#8a97a8;margin-bottom:14px;"></div>
+      <div class="detail-card">
+        <div class="section-label" style="margin-top:0;">Deal</div>
+        <select id="ss-deal" onchange="ssDealChanged()" style="width:100%;padding:12px;border-radius:10px;border:1px solid #22385a;background:#0b1626;color:#e9edf3;font-size:15px;">${opts}</select>
+        <div id="ss-dupwarn" style="margin-top:8px;"></div>
+        <div class="section-label">Message</div>
+        <textarea id="ss-body" style="width:100%;padding:12px;border-radius:10px;border:1px solid #22385a;background:#0b1626;color:#e9edf3;font-size:15px;min-height:150px;"></textarea>
+        <div style="font-size:11px;color:#5c6b82;margin-top:6px;">Placeholders: {firstName} {address} {city} {state} {ask} {arv} {beds} {baths} {sqft} {link} {phone}</div>
+      </div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;">
+        <button class="btn-ghost" style="flex:1;min-height:52px;" onclick="previewSingleSms()">👁 Preview</button>
+        <button class="btn-gold" id="ss-send" style="flex:2;min-height:52px;" onclick="sendSingleSms()">🚀 Send Text</button>
+      </div>
+      <div id="ss-preview" style="margin-top:14px;"></div>
+      <div style="font-size:11px;color:#5c6b82;margin-top:12px;">Contact is created in Quo automatically so the reply shows the buyer's name.</div>
+    </div>
+  </div>`);
+  ssDealChanged();
+  window.scrollTo(0, 0);
+}
+function ssDealChanged() {
+  const b = buyers.find(x => x.id === singleSmsBuyerId); if (!b) return;
+  const dealId = ($('ss-deal') || {}).value || '';
+  const d = deals.find(x => x.id === dealId);
+  const ta = document.getElementById('ss-body');
+  // Refill the template for the new deal unless Luca already edited the message.
+  if (d && ta && (!ta.value || ta.value === singleSmsLastFilled)) {
+    singleSmsLastFilled = fillSms(defaultSmsBody(), d, b);
+    ta.value = singleSmsLastFilled;
+  }
+  const sub = document.getElementById('ss-sub');
+  if (sub) sub.textContent = 'To: ' + (b.name || formatPhone(b.phone)) + ' · ' + formatPhone(b.phone) + (d ? ' · from ' + dealPhoneDispo(d) : '');
+  checkSingleSmsDup();
+}
+async function checkSingleSmsDup() {
+  const w = document.getElementById('ss-dupwarn'); if (!w) return;
+  const dealId = ($('ss-deal') || {}).value || '';
+  if (!dealId || !singleSmsBuyerId) { w.innerHTML = ''; return; }
+  const contacted = await contactedBuyerIds(dealId, 'dispoSmsBlasts');
+  const at = contacted.get(singleSmsBuyerId);
+  w.innerHTML = at
+    ? '<div style="font-size:13px;color:#e8b84b;background:#2a2113;border:1px solid #6b5416;border-radius:8px;padding:8px 10px;">⚠️ Already texted' + (at ? ' on ' + esc(shortDate(at)) : '') + ' for this deal — sending again will text them twice.</div>'
+    : '';
+}
+function previewSingleSms() {
+  const b = buyers.find(x => x.id === singleSmsBuyerId); if (!b) return;
+  const pv = document.getElementById('ss-preview'); if (!pv) return;
+  const msg = ($('ss-body') || {}).value || '';
+  pv.innerHTML = '<div class="detail-card"><div class="section-label" style="margin-top:0;">Text preview</div>' +
+    '<div style="display:flex;justify-content:flex-end;"><div style="max-width:80%;background:#1a6fd4;color:#fff;font-size:14px;line-height:1.45;padding:10px 14px;border-radius:18px 18px 4px 18px;white-space:pre-wrap;">' + esc(msg) + '</div></div>' +
+    '<div style="text-align:right;font-size:11px;color:#5c6b82;margin-top:4px;">Delivered</div></div>';
+  window.scrollTo(0, document.body.scrollHeight);
+}
+async function sendSingleSms() {
+  const b = buyers.find(x => x.id === singleSmsBuyerId); if (!b) return;
+  const dealId = ($('ss-deal') || {}).value || '';
+  const d = deals.find(x => x.id === dealId);
+  if (!d) { showToast('Pick a deal first'); return; }
+  if (!b.phone) { showToast('No phone on this buyer'); return; }
+  const btn = document.getElementById('ss-send');
+  if (btn) { btn.disabled = true; btn.textContent = 'Sending…'; }
+  try {
+    await ensureQuoContact(b, d);
+    const msgTpl = ($('ss-body') || {}).value || defaultSmsBody();
+    const msgFilled = fillSms(msgTpl, d, b);
+    await sendSmsViaQuo(b.phone, msgFilled, quoFromNumberId(d));
+    const now = new Date().toISOString();
+    await db.collection('dispoSmsBlasts').add({ type: 'single', dealId, dealAddress: d.address, to: digitsOnly(b.phone), buyerId: b.id, buyerIds: [b.id], startedAt: now, finishedAt: now, status: 'done', sent: 1 }).catch(() => {});
+    showToast('Text sent to ' + formatPhone(b.phone));
+    closeSmsOverlay();
+  } catch (e) {
+    showToast('Send failed: ' + e.message);
+    if (btn) { btn.disabled = false; btn.textContent = '🚀 Send Text'; }
+  }
+}
 /* ---------------- Bulk SMS blast (Quo) ---------------- */
 let smsRun = null;
 function closeSmsOverlay() { const el = document.getElementById('sms-blast'); if (el) el.remove(); }
@@ -2581,8 +2718,12 @@ async function openSmsBlast(dealId) {
   if (!d) return;
   showToast('Loading buyers…');
   let pulled = [];
-  try { pulled = await dealPulledBuyers(dealId); } catch (e) { showToast('Could not load buyers'); return; }
-  const withPhone = pulled.filter(r => r._buyer && r._buyer.phone && r._buyer.status !== 'inactive');
+  let contacted = new Map();
+  try { [pulled, contacted] = await Promise.all([dealPulledBuyers(dealId), contactedBuyerIds(dealId, 'dispoSmsBlasts')]); }
+  catch (e) { showToast('Could not load buyers'); return; }
+  const withPhoneAll = pulled.filter(r => r._buyer && r._buyer.phone && r._buyer.status !== 'inactive');
+  const alreadyTexted = withPhoneAll.filter(r => contacted.has(r._buyer.id)).length;
+  const withPhone = withPhoneAll.filter(r => !contacted.has(r._buyer.id));
   const top = withPhone.filter(r => r.smartMatch === true);
   smsRun = null;
   closeSmsOverlay();
@@ -2598,7 +2739,9 @@ async function openSmsBlast(dealId) {
         <div class="section-label" style="margin-top:0;">Recipients</div>
         ${top.length ? `<label style="display:block;font-size:14px;margin-bottom:8px;"><input type="radio" name="sb-group" value="top" checked /> 🏆 Top Ranked with phone (${top.length})</label>` : ''}
         <label style="display:block;font-size:14px;margin-bottom:4px;"><input type="radio" name="sb-group" value="all" ${top.length ? '' : 'checked'} /> 📋 All pulled buyers with phone (${withPhone.length})</label>
-        ${!withPhone.length ? '<div style="color:#e07a77;font-size:13px;margin-top:8px;">No buyers with phone numbers on this deal yet.</div>' : ''}
+        ${!withPhoneAll.length ? '<div style="color:#e07a77;font-size:13px;margin-top:8px;">No buyers with phone numbers on this deal yet.</div>' : ''}
+        ${alreadyTexted ? `<div style="color:#e8b84b;font-size:13px;margin-top:8px;">⏭ ${alreadyTexted} buyer${alreadyTexted === 1 ? '' : 's'} already texted for this deal — skipped.</div>` : ''}
+        ${withPhoneAll.length && !withPhone.length ? '<div style="color:#e07a77;font-size:13px;margin-top:8px;">Everyone with a phone was already texted for this deal.</div>' : ''}
       </div>
       <div class="detail-card">
         <div class="section-label" style="margin-top:0;">Message</div>
@@ -2655,6 +2798,9 @@ async function startSmsBlast(dealId) {
   try { pulled = await dealPulledBuyers(dealId); } catch (e) { showToast('Could not load buyers'); return; }
   let recips = pulled.filter(r => r._buyer && r._buyer.phone && r._buyer.status !== 'inactive');
   if (group === 'top') recips = recips.filter(r => r.smartMatch === true);
+  // Safety net: never re-text a buyer already texted for this deal (e.g. via a one-off text).
+  const contactedNow = await contactedBuyerIds(dealId, 'dispoSmsBlasts');
+  recips = recips.filter(r => !contactedNow.has(r._buyer.id));
   if (!recips.length) { showToast('No recipients in this group'); return; }
   const mins = Math.ceil(recips.length * intervalSec / 60);
   if (!confirm('Send ' + recips.length + ' texts, one every ' + intervalSec + ' seconds (~' + mins + ' min)?\n\nFrom ' + dealPhoneDispo(d) + '. Keep DispoHub open until it finishes.')) return;
@@ -2663,7 +2809,7 @@ async function startSmsBlast(dealId) {
   const msgTpl = ($('sb-body') || {}).value || defaultSmsBody();
   const fromId = quoFromNumberId(d);
   smsRun = { cancel: false, finished: false };
-  let ok = 0, fail = 0; const logArr = [];
+  let ok = 0, fail = 0; const logArr = []; const sentIds = [];
   const pushLog = line => { logArr.push(line); if (logArr.length > 60) logArr.shift(); };
   const renderProg = (done, note) => {
     if (!prog) return;
@@ -2687,9 +2833,9 @@ async function startSmsBlast(dealId) {
     const msgFilled = fillSms(msgTpl, d, b);
     try {
       await sendSmsViaQuo(b.phone, msgFilled, fromId);
-      ok++; pushLog('✅ ' + label);
+      ok++; sentIds.push(b.id); pushLog('✅ ' + label);
     } catch (e) { fail++; pushLog('❌ ' + label + ' — ' + e.message); }
-    if (blastRef) blastRef.set({ sent: ok, failed: fail }, { merge: true }).catch(() => {});
+    if (blastRef) blastRef.set({ sent: ok, failed: fail, buyerIds: sentIds }, { merge: true }).catch(() => {});
     renderProg(i + 1, i < recips.length - 1 ? '' : 'Finishing…');
     if (i < recips.length - 1 && smsRun && !smsRun.cancel) await smsPaceCountdown(intervalSec * 1000);
   }
@@ -2810,6 +2956,7 @@ function openBuyer(id) {
         ${b.phone ? `<a class="btn-gold" href="tel:${digitsOnly(b.phone)}" style="text-decoration:none;">📞 ${esc(formatPhone(b.phone))}</a>` : '<span style="color:#e07a77;font-size:14px;font-weight:700;">⚠️ No phone — needs skip trace (DISPO MANAGER)</span>'}
         ${b.email ? `<a class="btn-ghost" href="mailto:${esc(b.email)}" style="text-decoration:none;">✉️ Email</a>` : ''}
         ${b.email ? `<button class="btn-ghost" onclick="openSingleEmail('${b.id}')">📧 Deal Email</button>` : ''}
+        ${b.phone ? `<button class="btn-ghost" onclick="openSingleSms('${b.id}')">📱 Text</button>` : ''}
       </div>
       <div class="section-label">Buy Box</div>
       <div style="font-size:14px;color:#aeb9c7;font-style:italic;">🎯 ${esc(b.buyBox || 'Not recorded')}</div>
