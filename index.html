@@ -755,6 +755,18 @@ function showDealForm(dealId, searchId) {
       <div class="form-field"><label>Foundation <span style="color:var(--gray);font-weight:400;">— Age / condition details</span></label><textarea id="df-condFoundation" rows="2" placeholder="Age / condition details">${esc(d.condFoundation || '')}</textarea></div>
       <div class="form-field"><label>Interior <span style="color:var(--gray);font-weight:400;">— Condition details</span></label><textarea id="df-condInterior" rows="2" placeholder="Condition details">${esc(d.condInterior || '')}</textarea></div>
       <div class="form-field"><label>Other property details <span style="color:var(--gray);font-weight:400;">— Windows / driveway / water heater / appliances / exterior / pool / etc.</span></label><textarea id="df-condOther" rows="2" placeholder="Windows / driveway / water heater / appliances / exterior / pool / etc.">${esc(d.condOther || '')}</textarea></div>
+      <div class="section-label">Transaction details (shows on the landing page under Condition Details)</div>
+      <div class="form-field"><label>Walkthrough date <span style="color:var(--gray);font-weight:400;">— Date of walkthrough</span></label><textarea id="df-transWalkthrough" rows="2" placeholder="Date of walkthrough">${esc(d.transWalkthrough || '')}</textarea></div>
+      <div class="form-field"><label>Closing date <span style="color:var(--gray);font-weight:400;">— Target closing date</span></label><textarea id="df-transClosing" rows="2" placeholder="Target closing date">${esc(d.transClosing || '')}</textarea></div>
+      <div class="form-field"><label>Occupancy <span style="color:var(--gray);font-weight:400;">— Occupied / vacant / tenant / etc.</span></label><textarea id="df-transOccupancy" rows="2" placeholder="Occupied / vacant / tenant / etc.">${esc(d.transOccupancy || '')}</textarea></div>
+      <div class="form-field"><label>Access instructions <span style="color:var(--gray);font-weight:400;">— Lockbox code, showing instructions…</span></label><textarea id="df-transAccess" rows="2" placeholder="Lockbox code, showing instructions…">${esc(d.transAccess || '')}</textarea></div>
+      <div class="form-field"><label>Title company <span style="color:var(--gray);font-weight:400;">— Name of title company</span></label><textarea id="df-transTitle" rows="2" placeholder="Name of title company">${esc(d.transTitle || '')}</textarea></div>
+      <div class="form-field"><label>EMD required <span style="color:var(--gray);font-weight:400;">— Earnest money amount</span></label><textarea id="df-transEmd" rows="2" placeholder="Earnest money amount">${esc(d.transEmd || '')}</textarea></div>
+      <div class="form-field"><label>Proof of funds required</label><select id="df-transPof">
+      <option value="">— not set —</option>
+      <option value="Yes"${d.transPof === 'Yes' ? ' selected' : ''}>Yes</option>
+      <option value="No"${d.transPof === 'No' ? ' selected' : ''}>No</option>
+    </select></div>
       <div class="section-label">Seller</div>
       <div class="form-grid">
         ${fld('sellerName', 'Seller name', d.sellerName)}
@@ -791,6 +803,10 @@ async function saveDealForm(id) {
     condPlumbing: $('df-condPlumbing').value.trim(), condElectrical: $('df-condElectrical').value.trim(),
     condFoundation: $('df-condFoundation').value.trim(), condInterior: $('df-condInterior').value.trim(),
     condOther: $('df-condOther').value.trim(),
+    transWalkthrough: $('df-transWalkthrough').value.trim(), transClosing: $('df-transClosing').value.trim(),
+    transOccupancy: $('df-transOccupancy').value.trim(), transAccess: $('df-transAccess').value.trim(),
+    transTitle: $('df-transTitle').value.trim(), transEmd: $('df-transEmd').value.trim(),
+    transPof: ($('df-transPof') || {}).value || '',
     driveFolderUrl: v('driveFolderUrl'), headline: v('headline'),
     slug: (v('address') || '').replace(/[^a-zA-Z0-9]/g, ''),
     updatedAt: new Date().toISOString()
