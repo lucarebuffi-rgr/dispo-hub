@@ -730,6 +730,7 @@ function showDealForm(dealId, searchId) {
         ${fld('baths', 'Baths', d.baths, 'number')}
         ${fld('sqft', 'Sqft', d.sqft, 'number')}
         ${fld('yearBuilt', 'Year built', d.yearBuilt, 'number')}
+        ${fld('lotSize', 'Lot size (e.g. 0.5 acres)', d.lotSize)}
       </div>
       <div class="section-label">Numbers</div>
       <div class="form-grid">
@@ -794,7 +795,7 @@ async function saveDealForm(id) {
   const num = k => { const x = v(k).replace(/[^0-9.]/g, ''); return x === '' ? '' : +x; };
   const rec = {
     address: v('address'), city: v('city'), state: v('state') || 'GA', zip: v('zip'), county: v('county'),
-    propertyType: v('propertyType'), beds: num('beds'), baths: num('baths'), sqft: num('sqft'), yearBuilt: num('yearBuilt'),
+    propertyType: v('propertyType'), beds: num('beds'), baths: num('baths'), sqft: num('sqft'), yearBuilt: num('yearBuilt'), lotSize: v('lotSize'),
     contractPrice: num('contractPrice'), arv: num('arv'), repairEst: num('repairEst'),
     askPrice: num('askPrice'), assignmentFee: num('assignmentFee'), closeByDate: v('closeByDate'),
     sellerName: v('sellerName'), sellerPhone: v('sellerPhone'), notes: $('df-notes').value.trim(),
