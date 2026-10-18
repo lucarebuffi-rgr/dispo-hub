@@ -943,6 +943,7 @@ async function openDeal(id) {
       <div class="addr-sub">InvestorBase Smart Match picks for this deal — call these first.</div>
       ${topRanked.length ? `<button class="btn-gold" style="width:100%;min-height:52px;margin-bottom:12px;" onclick="startDialer('${id}')">📞 Start Call Session (${topRanked.length} buyers)</button>` : ''}
       <button class="btn-ghost" style="width:100%;min-height:52px;margin-bottom:12px;" onclick="openEmailBlast('${id}')">📧 Email Buyers</button>
+      <button class="btn-ghost" style="width:100%;min-height:52px;margin-bottom:12px;" onclick="openSmsBlast('${id}')">📱 Text Buyers</button>
       ${topRanked.length ? topRanked.map(pb => {
         const b = pb._buyer;
         const nm = (b && b.name) || pb.buyerName || 'Unknown buyer';
@@ -2211,6 +2212,76 @@ function defaultEmailSubject() { return '{firstName}off-market deal in {city}, {
 function defaultEmailBody() {
   return 'Hey {firstName},\n\nLuca Rebuffi here — I just put an off-market deal under contract in {city}, {state} and wanted you to see it before it goes anywhere else:\n\n{address}\nAsking {ask} · ARV {arv} · {beds} bd / {baths} ba · {sqft} sqft\n\nI attached a preview of the deal page so you know exactly what you are opening. Full details and photos here:\n{link}\n\nIf the numbers work, just reply to this email or call/text me at {phone}.\n\n— Luca\n\n---\nNo longer want deal alerts? Reply STOP and I will take you off the list.\nRoyal Groups Realty · ' + LUCA_MAIL_ADDR;
 }
+/* ---------------- Bulk SMS via Quo/OpenPhone ----------------
+   - Deal page "📱 Text Buyers": paced blast to Top Ranked or all pulled buyers with phone
+   - Sends through the Quo Apps Script proxy (same one the S&Z CRM uses).
+   - No opt-out footer by Luca's choice — texts read like personal one-offs. */
+const QUO_PROXY_URL = 'https://script.google.com/macros/s/AKfycbw4TyScLuANH0OHOceEoWd1K4yaku98qBCkzvXRj49sSR1jM8u3DevLoPWeO3BamS8l/exec';
+const QUO_TX_NUMBER_ID = 'PNX2w06KdK'; // (469) 606-3358
+const QUO_GA_NUMBER_ID = 'PNNjboAqko'; // (770) 762-5598
+function quoFromNumberId(deal) {
+  return String((deal || {}).state || '').toUpperCase() === 'GA' ? QUO_GA_NUMBER_ID : QUO_TX_NUMBER_ID;
+}
+function defaultSmsBody() {
+  return 'Hey {firstName}, Luca here — just locked up {address} in {city}. \n\n• Price: ${ask}\n• Details: {link}';
+}
+function fillSms(tpl, deal, buyer) {
+  // ${ask} / ${arv} carry their own $ so they don't double up with money()'s $ via fillBody
+  const raw = v => (v === '' || v == null || isNaN(+v)) ? '—' : (+v).toLocaleString('en-US', { maximumFractionDigits: 0 });
+  const t = String(tpl)
+    .split('${ask}').join('$' + raw(deal.askPrice))
+    .split('${arv}').join('$' + raw(deal.arv));
+  return fillBody(t, deal, buyer);
+}
+async function quoPost(body) {
+  // The proxy always answers HTTP 200 (even on failure) — must check the body's ok flag.
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 45000);
+  let res;
+  try {
+    res = await fetch(QUO_PROXY_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify(body),
+      signal: ctrl.signal,
+    });
+  } catch (e) {
+    throw new Error(e && e.name === 'AbortError' ? 'Quo proxy timed out — the Apps Script web app may need redeploying' : 'Quo proxy unreachable: ' + ((e && e.message) || e));
+  } finally { clearTimeout(timer); }
+  if (!res.ok) throw new Error('Quo proxy failed (HTTP ' + res.status + ')');
+  const data = await res.json().catch(() => ({}));
+  if (data && data.ok === false) throw new Error('Quo error: ' + (data.error || 'proxy error'));
+  return data;
+}
+function buyerSmsName(b, deal) {
+  // Split name for createContact; company-looking names go in the company field so Quo shows them by name.
+  // Everyone else gets "{city}, {state} Buyer" as company so Luca sees the market at a glance in Quo.
+  const full = [b.firstName, b.lastName].filter(Boolean).join(' ').trim() || String(b.name || '').trim();
+  const isCo = /\b(llc|inc|corp|properties|holdings|investments|group|partners|enterprises|ltd)\b/i.test(full);
+  if (isCo) return { firstName: full, lastName: '', company: full };
+  const parts = full.split(/\s+/).filter(Boolean);
+  const city = String(b.buyingCity || '').trim();
+  const st = String((deal && deal.state) || '').toUpperCase();
+  const market = [city, st].filter(Boolean).join(', ');
+  return { firstName: b.firstName || parts[0] || '', lastName: b.lastName || parts.slice(1).join(' ') || '', company: market ? market + ' Buyer' : 'Buyer' };
+}
+async function ensureQuoContact(b, deal) {
+  // Best-effort: create (or dedupe) the Quo contact so replies show the buyer's name. Non-fatal.
+  const digits = digitsOnly(b.phone || '');
+  if (!digits) return;
+  const nm = buyerSmsName(b, deal);
+  try {
+    await quoPost({ action: 'createContact', firstName: nm.firstName, lastName: nm.lastName, phone: digits, company: nm.company });
+  } catch (e) { console.warn('quo contact failed for ' + digits + ':', e.message); }
+}
+async function sendSmsViaQuo(phone, message, fromNumberId) {
+  const digits = digitsOnly(phone || '');
+  if (!digits) throw new Error('No phone number on this buyer');
+  if (!message || !message.trim()) throw new Error('Message is empty');
+  const body = { action: 'sendSms', to: digits, content: message.trim() };
+  if (fromNumberId) body.fromNumberId = fromNumberId;
+  return quoPost(body);
+}
 function dealEmailInner(deal, bodyText, photoURL) {
   const link = dealLandingURL(deal);
   const paras = String(bodyText).split(/\n{2,}/).map(p => p.trim()).filter(Boolean);
@@ -2494,6 +2565,141 @@ async function sendSingleEmail(buyerId) {
     if (btn) { btn.disabled = false; btn.textContent = '🚀 Send Now'; }
   }
 }
+/* ---------------- Bulk SMS blast (Quo) ---------------- */
+let smsRun = null;
+function closeSmsOverlay() { const el = document.getElementById('sms-blast'); if (el) el.remove(); }
+function maybeCloseSmsOverlay() {
+  if (smsRun && !smsRun.finished) {
+    if (!confirm('An SMS blast is still running. Close this screen and let it finish in the background?')) return;
+    showToast('SMS blast continues in the background');
+  }
+  smsRun = null;
+  closeSmsOverlay();
+}
+async function openSmsBlast(dealId) {
+  const d = deals.find(x => x.id === dealId);
+  if (!d) return;
+  showToast('Loading buyers…');
+  let pulled = [];
+  try { pulled = await dealPulledBuyers(dealId); } catch (e) { showToast('Could not load buyers'); return; }
+  const withPhone = pulled.filter(r => r._buyer && r._buyer.phone && r._buyer.status !== 'inactive');
+  const top = withPhone.filter(r => r.smartMatch === true);
+  smsRun = null;
+  closeSmsOverlay();
+  document.body.insertAdjacentHTML('beforeend', `
+  <div id="sms-blast" style="position:fixed;inset:0;z-index:3000;background:rgba(4,10,20,.94);overflow-y:auto;">
+    <div style="max-width:640px;margin:0 auto;padding:18px 16px 60px;">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
+        <div style="font-size:18px;font-weight:800;">📱 Text Buyers</div>
+        <button class="btn-ghost" onclick="maybeCloseSmsOverlay()">✕</button>
+      </div>
+      <div style="font-size:13px;color:#8a97a8;margin-bottom:14px;">${esc(d.address)} · from ${esc(dealPhoneDispo(d))}</div>
+      <div class="detail-card">
+        <div class="section-label" style="margin-top:0;">Recipients</div>
+        ${top.length ? `<label style="display:block;font-size:14px;margin-bottom:8px;"><input type="radio" name="sb-group" value="top" checked /> 🏆 Top Ranked with phone (${top.length})</label>` : ''}
+        <label style="display:block;font-size:14px;margin-bottom:4px;"><input type="radio" name="sb-group" value="all" ${top.length ? '' : 'checked'} /> 📋 All pulled buyers with phone (${withPhone.length})</label>
+        ${!withPhone.length ? '<div style="color:#e07a77;font-size:13px;margin-top:8px;">No buyers with phone numbers on this deal yet.</div>' : ''}
+      </div>
+      <div class="detail-card">
+        <div class="section-label" style="margin-top:0;">Message</div>
+        <textarea id="sb-body" style="width:100%;padding:12px;border-radius:10px;border:1px solid #22385a;background:#0b1626;color:#e9edf3;font-size:15px;min-height:150px;">${esc(defaultSmsBody())}</textarea>
+        <div style="font-size:11px;color:#5c6b82;margin-top:6px;">Placeholders: {firstName} {address} {city} {state} {ask} {arv} {beds} {baths} {sqft} {link} {phone}</div>
+        <div class="section-label">Seconds between texts</div>
+        <select id="sb-interval" style="width:100%;padding:12px;border-radius:10px;border:1px solid #22385a;background:#0b1626;color:#e9edf3;font-size:15px;">
+          <option value="5">5 seconds</option>
+          <option value="10" selected>10 seconds</option>
+          <option value="15">15 seconds</option>
+          <option value="30">30 seconds</option>
+          <option value="60">60 seconds</option>
+        </select>
+      </div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;">
+        <button class="btn-ghost" style="flex:1;min-height:52px;" onclick="previewSmsBlast('${d.id}')">👁 Preview</button>
+        <button class="btn-gold" id="sb-send" style="flex:2;min-height:52px;" ${withPhone.length ? '' : 'disabled'} onclick="startSmsBlast('${d.id}')">🚀 Send Texts</button>
+      </div>
+      <div id="sb-preview" style="margin-top:14px;"></div>
+      <div id="sb-progress" style="margin-top:14px;display:none;"></div>
+      <div style="font-size:11px;color:#5c6b82;margin-top:12px;">Keep DispoHub open until the blast finishes — background tabs may pause the timer. Contacts are created in Quo automatically so replies show the buyer's name.</div>
+    </div>
+  </div>`);
+  window.scrollTo(0, 0);
+}
+async function previewSmsBlast(dealId) {
+  const d = deals.find(x => x.id === dealId); if (!d) return;
+  const pv = document.getElementById('sb-preview'); if (!pv) return;
+  const msg = ($('sb-body') || {}).value || defaultSmsBody();
+  const sample = { firstName: 'Patrick', id: 'sample' };
+  const filled = fillSms(msg, d, sample);
+  pv.innerHTML = '<div class="detail-card"><div class="section-label" style="margin-top:0;">Text preview</div>' +
+    '<div style="display:flex;justify-content:flex-end;"><div style="max-width:80%;background:#1a6fd4;color:#fff;font-size:14px;line-height:1.45;padding:10px 14px;border-radius:18px 18px 4px 18px;white-space:pre-wrap;">' + esc(filled) + '</div></div>' +
+    '<div style="text-align:right;font-size:11px;color:#5c6b82;margin-top:4px;">Delivered</div></div>';
+  window.scrollTo(0, document.body.scrollHeight);
+}
+function smsPaceCountdown(ms) {
+  return new Promise(resolve => {
+    const end = Date.now() + ms;
+    const iv = setInterval(() => {
+      if (!smsRun || smsRun.cancel) { clearInterval(iv); resolve(); return; }
+      const left = Math.max(0, end - Date.now());
+      const el = document.getElementById('sb-countdown');
+      if (el) el.textContent = 'Next text in ' + Math.floor(left / 60) + ':' + String(Math.floor(left % 60)).padStart(2, '0');
+      if (left <= 0) { clearInterval(iv); resolve(); }
+    }, 1000);
+  });
+}
+async function startSmsBlast(dealId) {
+  const d = deals.find(x => x.id === dealId); if (!d || smsRun) return;
+  const group = (document.querySelector('input[name="sb-group"]:checked') || {}).value || 'all';
+  const intervalSec = parseInt(($('sb-interval') || {}).value || '10', 10) || 10;
+  let pulled = [];
+  try { pulled = await dealPulledBuyers(dealId); } catch (e) { showToast('Could not load buyers'); return; }
+  let recips = pulled.filter(r => r._buyer && r._buyer.phone && r._buyer.status !== 'inactive');
+  if (group === 'top') recips = recips.filter(r => r.smartMatch === true);
+  if (!recips.length) { showToast('No recipients in this group'); return; }
+  const mins = Math.ceil(recips.length * intervalSec / 60);
+  if (!confirm('Send ' + recips.length + ' texts, one every ' + intervalSec + ' seconds (~' + mins + ' min)?\n\nFrom ' + dealPhoneDispo(d) + '. Keep DispoHub open until it finishes.')) return;
+  const sendBtn = document.getElementById('sb-send'); if (sendBtn) sendBtn.disabled = true;
+  const prog = document.getElementById('sb-progress');
+  const msgTpl = ($('sb-body') || {}).value || defaultSmsBody();
+  const fromId = quoFromNumberId(d);
+  smsRun = { cancel: false, finished: false };
+  let ok = 0, fail = 0; const logArr = [];
+  const pushLog = line => { logArr.push(line); if (logArr.length > 60) logArr.shift(); };
+  const renderProg = (done, note) => {
+    if (!prog) return;
+    prog.style.display = 'block';
+    const pct = Math.round(done / recips.length * 100);
+    prog.innerHTML = '<div class="detail-card"><div class="section-label" style="margin-top:0;">Sending… ' + done + ' of ' + recips.length + '</div>' +
+      '<div style="height:10px;background:#0b1626;border-radius:6px;overflow:hidden;margin-bottom:10px;"><div style="height:100%;width:' + pct + '%;background:linear-gradient(90deg,#d4a843,#e8c476);"></div></div>' +
+      '<div id="sb-countdown" style="font-size:13px;color:#8a97a8;margin-bottom:8px;">' + esc(note || '') + '</div>' +
+      '<div id="sb-log" style="font-size:12px;color:#aeb9c7;max-height:180px;overflow-y:auto;background:#0b1626;border-radius:8px;padding:10px;">' + logArr.map(l => '<div>' + esc(l) + '</div>').join('') + '</div>' +
+      '<button class="btn-ghost" style="width:100%;min-height:48px;margin-top:10px;" onclick="cancelSmsBlast()">⏹ Cancel Blast</button></div>';
+    const lg = document.getElementById('sb-log'); if (lg) lg.scrollTop = lg.scrollHeight;
+  };
+  let blastRef = null;
+  try { blastRef = await db.collection('dispoSmsBlasts').add({ type: 'blast', dealId, dealAddress: d.address, startedAt: new Date().toISOString(), total: recips.length, sent: 0, failed: 0, status: 'running', intervalSec, template: msgTpl }); } catch (e) { console.warn('sms blast log failed', e); }
+  renderProg(0, 'Starting…');
+  for (let i = 0; i < recips.length; i++) {
+    if (!smsRun || smsRun.cancel) break;
+    const b = recips[i]._buyer;
+    const label = (i + 1) + '/' + recips.length + ' ' + formatPhone(b.phone);
+    await ensureQuoContact(b, d);
+    const msgFilled = fillSms(msgTpl, d, b);
+    try {
+      await sendSmsViaQuo(b.phone, msgFilled, fromId);
+      ok++; pushLog('✅ ' + label);
+    } catch (e) { fail++; pushLog('❌ ' + label + ' — ' + e.message); }
+    if (blastRef) blastRef.set({ sent: ok, failed: fail }, { merge: true }).catch(() => {});
+    renderProg(i + 1, i < recips.length - 1 ? '' : 'Finishing…');
+    if (i < recips.length - 1 && smsRun && !smsRun.cancel) await smsPaceCountdown(intervalSec * 1000);
+  }
+  const cancelled = !smsRun || smsRun.cancel;
+  if (blastRef) blastRef.set({ status: cancelled ? 'cancelled' : 'done', finishedAt: new Date().toISOString() }, { merge: true }).catch(() => {});
+  smsRun = { cancel: false, finished: true };
+  renderProg(recips.length, cancelled ? 'Cancelled.' : 'Done.');
+  showToast(cancelled ? 'SMS blast cancelled' : 'SMS blast done: ' + ok + ' sent' + (fail ? ', ' + fail + ' failed' : ''));
+}
+function cancelSmsBlast() { if (smsRun) smsRun.cancel = true; showToast('Cancelling after the current text…'); }
 /* Public landing page: photo gallery under the hero card */
 async function loadPublicPhotos(folderUrl) {
   const el = document.getElementById('pub-photos');
