@@ -1106,10 +1106,11 @@ function renderDriveCarousel(dealId, files) {
   if (!container) return;
   if (!files.length) { container.innerHTML = `<div class="drive-carousel-msg">No images found in that folder yet.</div>`; return; }
   const deal = (typeof deals !== 'undefined' ? deals.find(x => x.id === dealId) : null) || {};
+  const masterId = deal.masterPhotoId || '';
   const master = deal.masterPhoto || '';
   container.innerHTML = files.map(f => {
     const big = (f.thumbnailLink || '').replace(/=s\d+.*$/, '=s1200');
-    const isMaster = !!master && (master === big || (f.id && master.indexOf(f.id) !== -1));
+    const isMaster = (masterId && f.id === masterId) || (!!master && (master === big || (f.id && master.indexOf(f.id) !== -1)));
     return `<div class="drive-thumb-wrap${isMaster ? ' is-master' : ''}">
       <a href="https://drive.google.com/file/d/${f.id}/view" target="_blank" rel="noopener" class="drive-thumb-link" title="${esc(f.name)}">
         <img src="${f.thumbnailLink}" class="drive-thumb" loading="lazy" />
@@ -1120,14 +1121,13 @@ function renderDriveCarousel(dealId, files) {
 }
 async function setMasterPhoto(dealId, fileId) {
   const deal = (typeof deals !== 'undefined' ? deals.find(x => x.id === dealId) : null) || {};
-  const folderId = extractDriveFolderId(deal.driveFolderUrl || '');
-  const files = ((typeof driveCache !== 'undefined' && driveCache[folderId]) || {}).files || [];
-  const f = files.find(x => x.id === fileId);
-  const big = ((f || {}).thumbnailLink || '').replace(/=s\d+.*$/, '=s1200');
-  if (!big) { showToast('Could not get that photo — try again'); return; }
   try {
-    await db.collection('dispoDeals').doc(dealId).update({ masterPhoto: big });
-    if (deal.id) deal.masterPhoto = big;
+    // Store the file ID (permanent) — the site builds a stable thumbnail URL from it.
+    // The signed thumbnailLink expires, so we don't rely on the full URL anymore.
+    await db.collection('dispoDeals').doc(dealId).update({ masterPhotoId: fileId, masterPhoto: '' });
+    if (deal.id) { deal.masterPhotoId = fileId; deal.masterPhoto = ''; }
+    const folderId = extractDriveFolderId(deal.driveFolderUrl || '');
+    const files = ((typeof driveCache !== 'undefined' && driveCache[folderId]) || {}).files || [];
     renderDriveCarousel(dealId, files);
     await logActivity(dealId, '★ Master photo set');
     showToast('★ Master photo set — used on the deals page, emails & text previews');
@@ -2224,7 +2224,9 @@ function dealEmailHTML(deal, bodyText, photoURL) {
 }
 async function dealPhotoURLs(deal) {
   const urls = [];
-  if (deal && deal.masterPhoto) urls.push(deal.masterPhoto);
+  // Prefer the stable file-ID URL (never expires) over the legacy signed masterPhoto URL.
+  if (deal && deal.masterPhotoId) urls.push('https://drive.google.com/thumbnail?id=' + deal.masterPhotoId + '&sz=s1200');
+  else if (deal && deal.masterPhoto) urls.push(deal.masterPhoto);
   if (!deal || !deal.driveFolderUrl) return urls;
   const folderId = extractDriveFolderId(deal.driveFolderUrl);
   if (!folderId) return urls;
