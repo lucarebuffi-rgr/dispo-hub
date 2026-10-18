@@ -789,7 +789,8 @@ async function saveDealForm(id) {
 
 /* ================= Deal detail ================= */
 function shareDeal(id) {
-  const url = publicDealURL(id);
+  const deal = (typeof deals !== 'undefined' ? deals.find(x => x.id === id) : null) || { id };
+  const url = dealLandingURL(deal);
   const done = () => showToast('Deal page link copied — send it to buyers');
   if (navigator.clipboard && navigator.clipboard.writeText) {
     navigator.clipboard.writeText(url).then(done).catch(() => prompt('Copy this link:', url));
