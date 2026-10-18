@@ -354,7 +354,7 @@ const GOOGLE_API_KEY="AIzaSyBV20moxsKtzMqfg66XdaQ8Q4tGGNAK6I0"
 
 /* ---------------- Stages ---------------- */
 const DEAL_STAGES = [
-  { id: 'under_contract', label: 'Under Contract', color: '#8fc0e4' },
+  { id: 'under_contract', label: 'Ready to Market', color: '#8fc0e4' },
   { id: 'marketing', label: 'Marketing', color: '#e8c476' },
   { id: 'offers_in', label: 'Offers In', color: '#e0954a' },
   { id: 'assigned', label: 'Assigned', color: '#4caf82' },
@@ -816,7 +816,6 @@ async function saveDealForm(id) {
   if (!rec.address) { showToast('Address is required'); return; }
   if (id) {
     await db.collection('dispoDeals').doc(id).set(rec, { merge: true });
-    await logActivity(id, 'Deal details updated');
     showToast('Deal saved');
     await loadAll(); openDeal(id);
   } else {
@@ -827,7 +826,6 @@ async function saveDealForm(id) {
     if (window.pendingDealSearchId) {
       try {
         await db.collection('dispoBuyerSearches').doc(window.pendingDealSearchId).update({ dealId: ref.id });
-        await logActivity(ref.id, 'Linked to buyer search');
       } catch (e) { console.error('search link failed', e); }
     }
     window.pendingDealSearchId = '';
@@ -929,15 +927,15 @@ async function openDeal(id) {
       </div>
     </div>
 
+
     <div class="detail-card">
-      <h2 style="font-size:18px;">📊 Comps & MAO</h2>
-      <div class="addr-sub">Investor comps = what investors paid nearby · Retail comps = ARV support</div>
-      <div id="mao-box">${maoHTML(d)}</div>
-      <div class="section-label">Investor Comps (${invComps.length})</div>
-      <div id="inv-comps">${compRowsHTML(invComps, id)}</div>
-      <div class="section-label">Retail Comps (${retComps.length})</div>
-      <div id="ret-comps">${compRowsHTML(retComps, id)}</div>
-      <button class="btn-ghost" style="margin-top:10px;" onclick="showCompForm('${id}')">+ Add Comp</button>
+      <h2 style="font-size:18px;">🗺 Buyer Map <span id="deal-map-count" style="color:#8a97a8;font-size:13px;font-weight:400;"></span></h2>
+      <div class="addr-sub">Pulled buyers pinned around the deal — InvestorBase style. Tap a pin for details.</div>
+      <div id="deal-buyer-map" style="height:300px;border-radius:12px;overflow:hidden;margin-top:10px;background:#0b1626;"></div>
+      <div id="deal-map-status" style="font-size:12px;color:#8a97a8;margin-top:8px;"></div>
+      <div style="display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:#8a97a8;margin-top:6px;">
+        <span>📍 Deal</span><span>🟢 Entity / cash buyer</span><span>🔵 Individual</span><span>🟣 Trust</span><span>⚪ Other</span>
+      </div>
     </div>
 
     <div class="detail-card">
@@ -992,20 +990,20 @@ async function openDeal(id) {
       </div>
     </div>
 
-    <div class="detail-card">
-      <h2 style="font-size:18px;">🗺 Buyer Map <span id="deal-map-count" style="color:#8a97a8;font-size:13px;font-weight:400;"></span></h2>
-      <div class="addr-sub">Pulled buyers pinned around the deal — InvestorBase style. Tap a pin for details.</div>
-      <div id="deal-buyer-map" style="height:300px;border-radius:12px;overflow:hidden;margin-top:10px;background:#0b1626;"></div>
-      <div id="deal-map-status" style="font-size:12px;color:#8a97a8;margin-top:8px;"></div>
-      <div style="display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:#8a97a8;margin-top:6px;">
-        <span>📍 Deal</span><span>🟢 Entity / cash buyer</span><span>🔵 Individual</span><span>🟣 Trust</span><span>⚪ Other</span>
-      </div>
-    </div>
 
     <div class="detail-card">
-      <h2 style="font-size:18px;">📝 Activity</h2>
+      <h2 style="font-size:18px;cursor:pointer;user-select:none;" onclick="document.getElementById('activity-list').style.display = document.getElementById('activity-list').style.display === 'none' ? 'block' : 'none'; this.querySelector('.toggle-arrow').textContent = document.getElementById('activity-list').style.display === 'none' ? '▶' : '▼';">
+        <span class="toggle-arrow">▶</span> 📝 Activity
+      </h2>
+      <div id="activity-list" style="display:none;">
       <div class="timeline" id="deal-timeline">
-        ${activity.length ? activity.map(a => `<div class="timeline-item"><span class="timeline-ts">${esc(fmtDate(a.at))}</span><br>${esc(a.text)}</div>`).join('') : '<div class="timeline-empty">No activity yet.</div>'}
+        ${activity.length ? activity.filter(a => {
+          const t = (a.text || '');
+          // Keep only meaningful events: stage changes, offers, views, creation
+          return t.includes('Stage →') || t.includes('🌐 Web offer') || t.includes('Offer logged') || 
+                 t.includes('Deal created') || t.includes('viewed') || t.includes('Page view');
+        }).map(a => `<div class="timeline-item"><span class="timeline-ts">${esc(fmtDate(a.at))}</span><br>${esc(a.text)}</div>`).join('') || '<div class="timeline-empty">No key activity yet.</div>' : '<div class="timeline-empty">No activity yet.</div>'}
+      </div>
       </div>
       <div style="display:flex;gap:8px;margin-top:12px;">
         <input id="note-input" placeholder="Add a note…" style="flex:1;padding:11px 12px;border-radius:10px;border:1px solid #22385a;background:#0b1626;color:#e9edf3;font-size:14px;">
@@ -1022,7 +1020,6 @@ async function openDeal(id) {
 }
 async function deleteOffer(dealId, offerId) {
   await db.collection('dispoOffers').doc(offerId).delete();
-  await logActivity(dealId, 'Offer deleted');
   showToast('Offer deleted');
   openDeal(dealId);
 }
@@ -1124,7 +1121,6 @@ async function setMasterPhoto(dealId, fileId) {
     const folderId = extractDriveFolderId(deal.driveFolderUrl || '');
     const files = ((typeof driveCache !== 'undefined' && driveCache[folderId]) || {}).files || [];
     renderDriveCarousel(dealId, files);
-    await logActivity(dealId, '★ Master photo set');
     showToast('★ Master photo set — used on the deals page, emails & text previews');
   } catch (e) { showToast('Could not save — try again'); }
 }
@@ -1148,17 +1144,22 @@ async function fetchDriveFolderName(dealId, folderUrl) {
 }
 function showOfferForm(dealId) {
   const d = deals.find(x => x.id === dealId);
-  const opts = buyers.filter(b => b.status !== 'inactive').map(b => `<option value="${esc(b.name)}">${esc(b.name)}</option>`).join('');
+  const opts = buyers.filter(b => b.status !== 'inactive').map(b => `<option value="${b.id}">${esc(b.name)}</option>`).join('');
   $('content').innerHTML = `<div class="detail-wrap">
     <button class="back-btn" onclick="openDeal('${dealId}')">← Back to deal</button>
     <div class="detail-card">
       <h2>Log Offer — ${esc(d.address)}</h2>
       <div class="section-label">Offer</div>
       <div class="form-grid">
-        <div class="form-field"><label>Buyer</label><select id="of-buyer">${opts}</select></div>
+        <div class="form-field"><label>Buyer</label><select id="of-buyer" onchange="document.getElementById('new-buyer-fields').style.display = this.value === 'NEW' ? 'grid' : 'none'"><option value="">— Select buyer —</option>${opts}<option value="NEW">＋ New Buyer…</option></select></div>
         <div class="form-field"><label>Amount $</label><input type="number" id="of-amount"></div>
         <div class="form-field"><label>EMD $</label><input type="number" id="of-emd"></div>
         <div class="form-field"><label>Close date</label><input type="date" id="of-close"></div>
+      </div>
+      <div class="form-grid" id="new-buyer-fields" style="display:none;margin-top:10px;">
+        <div class="form-field"><label>New buyer name *</label><input type="text" id="of-new-name"></div>
+        <div class="form-field"><label>Phone</label><input type="tel" id="of-new-phone"></div>
+        <div class="form-field"><label>Email</label><input type="email" id="of-new-email"></div>
       </div>
       <div class="form-field" style="margin-top:10px;"><label>Notes</label><textarea id="of-notes"></textarea></div>
       <div style="margin-top:18px;display:flex;gap:10px;">
@@ -1172,9 +1173,33 @@ function showOfferForm(dealId) {
 async function saveOffer(dealId) {
   const amount = +($('of-amount').value || 0);
   if (!amount) { showToast('Offer amount is required'); return; }
+  const buyerSel = $('of-buyer').value;
+  let buyerId = null, buyerName = '';
+  if (buyerSel === 'NEW') {
+    buyerName = $('of-new-name').value.trim();
+    if (!buyerName) { showToast('New buyer name is required'); return; }
+    const newBuyer = {
+      name: buyerName,
+      phone: $('of-new-phone').value.trim(),
+      email: $('of-new-email').value.trim(),
+      source: 'manual_offer',
+      dealId,
+      createdAt: new Date().toISOString()
+    };
+    const ref = await db.collection('dispoBuyers').add(newBuyer);
+    buyerId = ref.id;
+    buyers.push({ id: buyerId, ...newBuyer });
+  } else if (buyerSel) {
+    buyerId = buyerSel;
+    const b = buyers.find(x => x.id === buyerSel);
+    buyerName = b ? b.name : '';
+  } else {
+    showToast('Select a buyer'); return;
+  }
   await db.collection('dispoOffers').add({
     dealId,
-    buyerName: $('of-buyer').value,
+    buyerId: buyerId || '',
+    buyerName,
     amount,
     emd: +($('of-emd').value || 0) || '',
     closeDate: $('of-close').value || '',
@@ -1182,7 +1207,7 @@ async function saveOffer(dealId) {
     status: 'pending',
     createdAt: new Date().toISOString()
   });
-  await logActivity(dealId, `Offer logged: ${money(amount)} from ${$('of-buyer').value}`);
+  await logActivity(dealId, `Offer logged: ${money(amount)} from ${buyerName}`);
   const d = deals.find(x => x.id === dealId);
   if (d && d.stage === 'marketing') {
     await db.collection('dispoDeals').doc(dealId).set({ stage: 'offers_in' }, { merge: true });
@@ -1274,7 +1299,6 @@ async function saveComp(dealId) {
     notes: $('cp-notes').value.trim(),
     createdAt: new Date().toISOString()
   });
-  await logActivity(dealId, `Comp added: ${money(price)} (${$('cp-type').value})`);
   showToast('Comp saved');
   openDeal(dealId);
 }
