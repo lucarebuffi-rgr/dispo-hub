@@ -1008,6 +1008,11 @@ async function openDeal(id) {
     </div>
 
     <div class="detail-card">
+      <h2 style="font-size:18px;">👁️ Page Views <span style="color:#8a97a8;font-size:13px;font-weight:400;" id="views-count"></span></h2>
+      <div id="views-list"><div class="timeline-empty">Loading views…</div></div>
+    </div>
+
+    <div class="detail-card">
       <h2 style="font-size:18px;">📝 Activity</h2>
       <div class="timeline" id="deal-timeline">
         ${activity.length ? activity.map(a => `<div class="timeline-item"><span class="timeline-ts">${esc(fmtDate(a.at))}</span><br>${esc(a.text)}</div>`).join('') : '<div class="timeline-empty">No activity yet.</div>'}
@@ -1023,6 +1028,62 @@ async function openDeal(id) {
   if (d.driveFolderUrl && editingDriveFor !== d.id) {
     fetchDrivePhotos(d.id, d.driveFolderUrl);
     fetchDriveFolderName(d.id, d.driveFolderUrl);
+  }
+  loadDealViews(id);
+}
+async function loadDealViews(dealId) {
+  const listEl = document.getElementById('views-list');
+  const countEl = document.getElementById('views-count');
+  if (!listEl) return;
+  try {
+    const snap = await db.collection('dispoPageViews').where('dealId', '==', dealId).get();
+    const views = snap.docs.map(v => ({ id: v.id, ...v.data() }));
+    const pageViews = views.filter(v => v.type === 'view');
+    const timeEvents = views.filter(v => v.type === 'time');
+    const clicks = views.filter(v => v.type === 'click');
+    // Group by session
+    const sessions = {};
+    pageViews.forEach(v => {
+      const s = v.sessionId || 'unknown';
+      if (!sessions[s]) sessions[s] = { buyerId: v.buyerId, views: 0, time: 0, clicks: [] };
+      sessions[s].views++;
+      if (v.buyerId && !sessions[s].buyerId) sessions[s].buyerId = v.buyerId;
+    });
+    timeEvents.forEach(v => {
+      const s = v.sessionId || 'unknown';
+      if (sessions[s]) sessions[s].time += (+v.seconds || 0);
+    });
+    clicks.forEach(v => {
+      const s = v.sessionId || 'unknown';
+      if (sessions[s]) sessions[s].clicks.push(v.action);
+    });
+    const sessionList = Object.values(sessions).sort((a, b) => b.views - a.views);
+    const totalTime = timeEvents.reduce((sum, v) => sum + (+v.seconds || 0), 0);
+    const avgTime = pageViews.length ? Math.round(totalTime / pageViews.length) : 0;
+    if (countEl) countEl.textContent = `(${pageViews.length} views · ${Object.keys(sessions).length} visitors · ~${avgTime}s avg)`;
+    if (!sessionList.length) {
+      listEl.innerHTML = '<div class="timeline-empty">No views yet. Share the deal link to start tracking.</div>';
+      return;
+    }
+    // Resolve buyer names
+    const buyerIds = [...new Set(sessionList.map(s => s.buyerId).filter(Boolean))];
+    const buyerMap = {};
+    for (const bid of buyerIds) {
+      try {
+        const bdoc = await db.collection('dispoBuyers').doc(bid).get();
+        if (bdoc.exists) buyerMap[bid] = bdoc.data().name || 'Unknown';
+      } catch (e) {}
+    }
+    listEl.innerHTML = sessionList.slice(0, 20).map(s => {
+      const name = s.buyerId ? (buyerMap[s.buyerId] || 'Unknown buyer') : 'Anonymous';
+      const timeStr = s.time > 60 ? Math.round(s.time / 60) + 'm' : s.time + 's';
+      const actions = [...new Set(s.clicks)].join(', ') || 'browsed';
+      const hot = s.time > 120 || s.views > 2 || s.clicks.includes('offer_submit_attempt') ? ' 🔥' : '';
+      return `<div class="match-row"><div class="match-info"><div class="n">${esc(name)}${hot}</div><div class="w">${s.views} view${s.views > 1 ? 's' : ''} · ${timeStr} · ${esc(actions)}</div></div></div>`;
+    }).join('');
+  } catch (e) {
+    console.error('views load failed', e);
+    listEl.innerHTML = '<div class="timeline-empty">Could not load views.</div>';
   }
 }
 async function deleteOffer(dealId, offerId) {
@@ -2162,6 +2223,8 @@ function personFirstName(buyer) {
 }
 function fillBody(tpl, deal, buyer) {
   const fn = personFirstName(buyer) || 'there';
+  const buyerId = buyer && (buyer.id || buyer.buyerId) ? (buyer.id || buyer.buyerId) : '';
+  const link = dealLandingURL(deal) + (buyerId ? '?b=' + encodeURIComponent(buyerId) : '');
   return String(tpl)
     .split('{firstName}').join(fn)
     .split('{address}').join(deal.address || '')
@@ -2172,17 +2235,19 @@ function fillBody(tpl, deal, buyer) {
     .split('{beds}').join(deal.beds || '—')
     .split('{baths}').join(deal.baths || '—')
     .split('{sqft}').join(deal.sqft ? (+deal.sqft).toLocaleString() : '—')
-    .split('{link}').join(dealLandingURL(deal))
+    .split('{link}').join(link)
     .split('{phone}').join(dealPhoneDispo(deal));
 }
 function fillSubject(tpl, deal, buyer) {
   const fn = personFirstName(buyer);
+  const buyerId = buyer && (buyer.id || buyer.buyerId) ? (buyer.id || buyer.buyerId) : '';
+  const link = dealLandingURL(deal) + (buyerId ? '?b=' + encodeURIComponent(buyerId) : '');
   return String(tpl)
     .split('{firstName}').join(fn ? fn + ' — ' : '')
     .split('{address}').join(deal.address || '')
     .split('{city}').join(deal.city || '')
     .split('{state}').join(deal.state || 'GA')
-    .split('{link}').join(dealLandingURL(deal));
+    .split('{link}').join(link);
 }
 function defaultEmailSubject() { return '{firstName}off-market deal in {city}, {state}'; }
 function defaultEmailBody() {
