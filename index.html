@@ -736,7 +736,8 @@ function showDealForm(dealId, searchId) {
       <div class="form-grid">
         ${fld('contractPrice', 'Contract price $', d.contractPrice, 'number')}
         ${fld('arv', 'ARV $', d.arv, 'number')}
-        ${fld('repairEst', 'Repair estimate $', d.repairEst, 'number')}
+        ${fld('rehabFlip', 'Est. flip rehab $', d.rehabFlip, 'number')}
+        ${fld('rehabRentReady', 'Est. rent-ready rehab $', d.rehabRentReady, 'number')}
         ${fld('askPrice', 'Ask price $', d.askPrice, 'number')}
         ${fld('assignmentFee', 'Assignment fee target $', d.assignmentFee, 'number')}
         ${fld('closeByDate', 'Close-by / contingency date', d.closeByDate, 'date')}
@@ -796,7 +797,7 @@ async function saveDealForm(id) {
   const rec = {
     address: v('address'), city: v('city'), state: v('state') || 'GA', zip: v('zip'), county: v('county'),
     propertyType: v('propertyType'), beds: num('beds'), baths: num('baths'), sqft: num('sqft'), yearBuilt: num('yearBuilt'), lotSize: v('lotSize'),
-    contractPrice: num('contractPrice'), arv: num('arv'), repairEst: num('repairEst'),
+    contractPrice: num('contractPrice'), arv: num('arv'), rehabFlip: num('rehabFlip'), rehabRentReady: num('rehabRentReady'),
     askPrice: num('askPrice'), assignmentFee: num('assignmentFee'), closeByDate: v('closeByDate'),
     sellerName: v('sellerName'), sellerPhone: v('sellerPhone'), notes: $('df-notes').value.trim(),
     compRoof: v('compRoof'), compHvac: v('compHvac'), compPlumbing: v('compPlumbing'), compCosmetic: v('compCosmetic'),
@@ -886,7 +887,8 @@ async function openDeal(id) {
       <div class="num-grid">
         <div class="num-box"><div class="l">Contract</div><div class="v">${money(d.contractPrice)}</div></div>
         <div class="num-box"><div class="l">ARV</div><div class="v">${money(d.arv)}</div></div>
-        <div class="num-box"><div class="l">Repairs</div><div class="v">${money(d.repairEst)}</div></div>
+        <div class="num-box"><div class="l">Flip Rehab</div><div class="v">${money(d.rehabFlip)}</div></div>
+        <div class="num-box"><div class="l">Rent-Ready</div><div class="v">${money(d.rehabRentReady)}</div></div>
         <div class="num-box"><div class="l">Ask</div><div class="v green">${money(d.askPrice)}</div></div>
         <div class="num-box"><div class="l">Fee Target</div><div class="v">${money(d.assignmentFee)}</div></div>
         <div class="num-box"><div class="l">ARV − Contract</div><div class="v ${spread > 0 ? 'green' : ''}">${spread != null ? money(spread) : '—'}</div></div>
@@ -1198,7 +1200,7 @@ async function saveOffer(dealId) {
 /* ================= Comps + MAO ================= */
 function maoHTML(d) {
   const pct = +(d.maoPct || 70);
-  const arv = +d.arv || 0, repairs = +d.repairEst || 0, fee = +d.assignmentFee || 0;
+  const arv = +d.arv || 0, repairs = +d.rehabFlip || +d.repairEst || 0, fee = +d.assignmentFee || 0;
   const mao = arv ? Math.round(arv * pct / 100 - repairs - fee) : null;
   const contract = +d.contractPrice || 0;
   const verdict = (mao != null && contract) ? (contract <= mao ? 'good' : 'bad') : null;
@@ -1328,7 +1330,7 @@ async function renderPublicDeal(id) {
             ${d.yearBuilt ? `<span>🏠 Built ${esc(d.yearBuilt)}</span>` : ''}
             ${d.propertyType ? `<span>🏷️ ${esc(d.propertyType)}</span>` : ''}
           </div>
-          ${d.repairEst ? `<div style="margin-top:12px;font-size:14px;color:#aeb9c7;">🔧 Est. repairs: <b style="color:#e8c476;">${money(d.repairEst)}</b></div>` : ''}
+          ${(d.rehabFlip || d.rehabRentReady) ? `<div style="margin-top:12px;font-size:14px;color:#aeb9c7;">🔧 ${[d.rehabFlip ? `Flip rehab <b style="color:#e8c476;">${money(d.rehabFlip)}</b>` : '', d.rehabRentReady ? `Rent-ready rehab <b style="color:#e8c476;">${money(d.rehabRentReady)}</b>` : ''].filter(Boolean).join(' · ')}</div>` : ''}
           ${d.notes ? `<div style="margin-top:14px;font-size:14px;color:#aeb9c7;line-height:1.7;white-space:pre-wrap;">${esc(d.notes)}</div>` : ''}
         </div>
       </div>
