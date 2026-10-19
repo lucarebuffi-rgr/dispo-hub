@@ -255,6 +255,7 @@
       <button class="tab-btn" data-tab="find">🔍 Find Buyers</button>
       <button class="tab-btn" data-tab="kpis">📊 KPIs</button>
       <button class="tab-btn" data-tab="dialer">📞 Dialer <span class="pill" id="dialer-pill">0</span></button>
+      <button class="tab-btn" data-tab="smstmpl">💬 SMS Templates</button>
     </div>
   </div>
 </div>
@@ -666,6 +667,7 @@ function switchTab(t) {
   else if (t === 'buyers') renderBuyers();
   else if (t === 'find') renderBuyerSearch();
   else if (t === 'dialer') renderDialer();
+  else if (t === 'smstmpl') renderSmsTemplates();
   else renderKPIs();
 }
 document.querySelectorAll('.tab-btn').forEach(b => b.onclick = () => switchTab(b.dataset.tab));
@@ -697,6 +699,7 @@ $('import-buyers-btn').onclick = () => importBuyers();
   if (pubDeal) { renderPublicDeal(pubDeal); return; }
   $('content').innerHTML = '<div class="empty-state">Loading…</div>';
   try { await loadAll(); } catch (e) { console.error(e); }
+  loadSmsTemplates().catch(() => {}); // warm the SMS template cache (non-blocking)
   switchTab('deals');
 })();
 
@@ -2235,6 +2238,34 @@ function followUpSmsBody(n) {
   if (n === 4) return "Either I got the wrong number.. or you're just no longer buying out in {city}.\nReach out if you start buying again please,\nGod Bless";
   return "{firstName} don't mean to bother; just dont want you missing it..\nIn case you missed my last text, I got an actual deal out in {city}.. were you able to check it out?";
 }
+/* ---------------- SMS template settings (editable in 💬 SMS Templates tab) ----------------
+   Stored in Firestore dispoSettings/smsTemplates. smsT(n) is the sync accessor used by
+   the blast + follow-up code; the cache is warmed at boot so it's always ready. */
+let smsTemplatesCache = null;
+async function loadSmsTemplates() {
+  if (smsTemplatesCache) return smsTemplatesCache;
+  const fallback = { sms1: defaultSmsBody(), sms2: followUpSmsBody(2), sms3: followUpSmsBody(3), sms4: followUpSmsBody(4) };
+  try {
+    const doc = await db.collection('dispoSettings').doc('smsTemplates').get();
+    if (doc.exists) {
+      const d = doc.data() || {};
+      smsTemplatesCache = {
+        sms1: d.sms1 || fallback.sms1,
+        sms2: d.sms2 || fallback.sms2,
+        sms3: d.sms3 || fallback.sms3,
+        sms4: d.sms4 || fallback.sms4,
+      };
+      return smsTemplatesCache;
+    }
+  } catch (e) { console.error('loadSmsTemplates', e); }
+  smsTemplatesCache = fallback;
+  return smsTemplatesCache;
+}
+function smsT(n) {
+  const c = smsTemplatesCache;
+  if (c && c['sms' + n]) return c['sms' + n];
+  return n === 1 ? defaultSmsBody() : followUpSmsBody(n);
+}
 function fillSms(tpl, deal, buyer) {
   // ${ask} / ${arv} carry their own $ so they don't double up with money()'s $ via fillBody
   const raw = v => (v === '' || v == null || isNaN(+v)) ? '—' : (+v).toLocaleString('en-US', { maximumFractionDigits: 0 });
@@ -2242,6 +2273,41 @@ function fillSms(tpl, deal, buyer) {
     .split('${ask}').join('$' + raw(deal.askPrice))
     .split('${arv}').join('$' + raw(deal.arv));
   return fillBody(t, deal, buyer);
+}
+/* ---------------- 💬 SMS Templates editor ---------------- */
+async function renderSmsTemplates() {
+  $('content').innerHTML = '<div class="empty-state">Loading templates…</div>';
+  const t = await loadSmsTemplates();
+  const field = (n, label, sub) => `
+    <div class="form-field" style="margin-bottom:14px;"><label>${label}</label>
+      ${sub ? `<div class="addr-sub" style="margin-bottom:6px;">${sub}</div>` : ''}
+      <textarea id="st-sms${n}" style="width:100%;padding:12px;border-radius:10px;border:1px solid #22385a;background:#0b1626;color:#e9edf3;font-size:15px;min-height:110px;">${esc(t['sms' + n])}</textarea>
+    </div>`;
+  $('content').innerHTML = `
+    <div class="detail-card">
+      <h2 style="font-size:18px;">💬 SMS Templates</h2>
+      <div class="addr-sub">Used by the bulk SMS blast (SMS #1) and the dialer follow-ups (SMS #2–#4).</div>
+      <div class="addr-sub" style="margin:8px 0 14px;">Placeholders: <code>{firstName} {address} {city} {state} {ask} {arv} {beds} {baths} {sqft} {link} {phone}</code><br>Use <code>\${ask}</code> / <code>\${arv}</code> for the price with its own $ sign.</div>
+      ${field(1, 'SMS #1 — Bulk blast', 'Sent via 📱 Text Buyers. This is the gate for dialer entry.')}
+      ${field(2, 'SMS #2 — Follow-up', 'Manual text after Day 1 calls.')}
+      ${field(3, 'SMS #3 — Follow-up', 'Manual text after Day 2 calls.')}
+      ${field(4, 'SMS #4 — Follow-up', 'Manual text after Day 4 calls.')}
+      <button class="btn-gold" style="width:100%;min-height:52px;font-size:16px;" onclick="saveSmsTemplates()">💾 Save Templates</button>
+      <div id="st-saved" class="addr-sub" style="margin-top:8px;display:none;color:#4caf82;font-weight:700;">Saved ✓</div>
+    </div>`;
+}
+async function saveSmsTemplates() {
+  const rec = {
+    sms1: $('st-sms1').value,
+    sms2: $('st-sms2').value,
+    sms3: $('st-sms3').value,
+    sms4: $('st-sms4').value,
+    updatedAt: new Date().toISOString(),
+  };
+  await db.collection('dispoSettings').doc('smsTemplates').set(rec, { merge: true });
+  smsTemplatesCache = { sms1: rec.sms1, sms2: rec.sms2, sms3: rec.sms3, sms4: rec.sms4 };
+  const el = $('st-saved');
+  if (el) { el.style.display = 'block'; setTimeout(() => { el.style.display = 'none'; }, 2500); }
 }
 async function quoPost(body) {
   // The proxy always answers HTTP 200 (even on failure) — must check the body's ok flag.
@@ -2698,7 +2764,7 @@ function ssDealChanged() {
   const ta = document.getElementById('ss-body');
   // Refill the template for the new deal unless Luca already edited the message.
   if (d && ta && (!ta.value || ta.value === singleSmsLastFilled)) {
-    singleSmsLastFilled = fillSms(singleSmsBodyOverride || defaultSmsBody(), d, b);
+    singleSmsLastFilled = fillSms(singleSmsBodyOverride || smsT(1), d, b);
     ta.value = singleSmsLastFilled;
   }
   const sub = document.getElementById('ss-sub');
@@ -2738,7 +2804,7 @@ async function sendSingleSms() {
   if (btn) { btn.disabled = true; btn.textContent = 'Sending…'; }
   try {
     await ensureQuoContact(b, d);
-    const msgTpl = ($('ss-body') || {}).value || defaultSmsBody();
+    const msgTpl = ($('ss-body') || {}).value || smsT(1);
     const msgFilled = fillSms(msgTpl, d, b);
     await sendSmsViaQuo(b.phone, msgFilled, quoFromNumberId(d));
     const now = new Date().toISOString();
@@ -2811,7 +2877,7 @@ async function openSmsBlast(dealId) {
       </div>
       <div class="detail-card">
         <div class="section-label" style="margin-top:0;">Message</div>
-        <textarea id="sb-body" style="width:100%;padding:12px;border-radius:10px;border:1px solid #22385a;background:#0b1626;color:#e9edf3;font-size:15px;min-height:150px;">${esc(defaultSmsBody())}</textarea>
+        <textarea id="sb-body" style="width:100%;padding:12px;border-radius:10px;border:1px solid #22385a;background:#0b1626;color:#e9edf3;font-size:15px;min-height:150px;">${esc(smsT(1))}</textarea>
         <div style="font-size:11px;color:#5c6b82;margin-top:6px;">Placeholders: {firstName} {address} {city} {state} {ask} {arv} {beds} {baths} {sqft} {link} {phone}</div>
         <div class="section-label">Seconds between texts</div>
         <select id="sb-interval" style="width:100%;padding:12px;border-radius:10px;border:1px solid #22385a;background:#0b1626;color:#e9edf3;font-size:15px;">
@@ -2836,7 +2902,7 @@ async function openSmsBlast(dealId) {
 async function previewSmsBlast(dealId) {
   const d = deals.find(x => x.id === dealId); if (!d) return;
   const pv = document.getElementById('sb-preview'); if (!pv) return;
-  const msg = ($('sb-body') || {}).value || defaultSmsBody();
+  const msg = ($('sb-body') || {}).value || smsT(1);
   const sample = { firstName: 'Patrick', id: 'sample' };
   const filled = fillSms(msg, d, sample);
   pv.innerHTML = '<div class="detail-card"><div class="section-label" style="margin-top:0;">Text preview</div>' +
@@ -2872,7 +2938,7 @@ async function startSmsBlast(dealId) {
   if (!confirm('Send ' + recips.length + ' texts, one every ' + intervalSec + ' seconds (~' + mins + ' min)?\n\nFrom ' + dealPhoneDispo(d) + '. Keep DispoHub open until it finishes.')) return;
   const sendBtn = document.getElementById('sb-send'); if (sendBtn) sendBtn.disabled = true;
   const prog = document.getElementById('sb-progress');
-  const msgTpl = ($('sb-body') || {}).value || defaultSmsBody();
+  const msgTpl = ($('sb-body') || {}).value || smsT(1);
   const fromId = quoFromNumberId(d);
   smsRun = { cancel: false, finished: false };
   let ok = 0, fail = 0; const logArr = []; const sentIds = [];
@@ -3364,7 +3430,7 @@ function renderDialerSmsPrompt(b, dayJustCompleted) {
 }
 function ddSendFollowupSms(buyerId, smsNum) {
   openSingleSms(buyerId, {
-    bodyOverride: followUpSmsBody(smsNum),
+    bodyOverride: smsT(smsNum),
     preselectDealId: ddDealFilter !== 'all' ? ddDealFilter : null,
     followup: { dealId: ddDealFilter !== 'all' ? ddDealFilter : null, smsNum, buyerId }
   });
