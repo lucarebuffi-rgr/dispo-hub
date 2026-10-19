@@ -3228,6 +3228,10 @@ async function startSmsBlast(dealId) {
   smsRun = { cancel: false, finished: true };
   renderProg(recips.length, cancelled ? 'Cancelled.' : 'Done.');
   showToast(cancelled ? 'SMS blast cancelled' : 'SMS blast done: ' + ok + ' sent' + (fail ? ', ' + fail + ' failed' : ''));
+  // Refresh the deal detail so the dialer button unlocks
+  if (typeof openDeal === 'function' && dealId) {
+    setTimeout(() => openDeal(dealId), 500);
+  }
 }
 function cancelSmsBlast() { if (smsRun) smsRun.cancel = true; showToast('Cancelling after the current text…'); }
 /* Public landing page: photo gallery under the hero card */
