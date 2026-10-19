@@ -2260,8 +2260,14 @@ async function linkBuyerToDeal(buyerId) {
 /* ================= KPI dashboard ================= */
 async function renderKPIs() {
   sectionContentEl().innerHTML = '<div class="empty-state">Loading KPIs…</div>';
-  const offersSnap = await db.collection('dispoOffers').get();
-  const offers = offersSnap.docs.map(o => o.data());
+  let offers = [];
+  try {
+    const offersSnap = await db.collection('dispoOffers').get();
+    offers = offersSnap.docs.map(o => o.data());
+  } catch (e) {
+    sectionContentEl().innerHTML = '<div class="empty-state">Failed to load offers: ' + esc(e.message) + '</div>';
+    return;
+  }
   const active = deals.filter(d => !['closed', 'dead'].includes(d.stage));
   const closedDeals = deals.filter(d => d.stage === 'closed');
   const assignedDeals = deals.filter(d => d.stage === 'assigned');
