@@ -65,6 +65,7 @@
     display: flex; align-items: center; gap: 8px;
   }
   .tab-btn.active { color: #e8c476; border-bottom-color: #d4a843; }
+  .tab-btn:hover { color: #e8c476; }
   .tab-btn .pill { background: rgba(212,168,67,.14); color: #e8c476; font-size: 12px; padding: 2px 10px; border-radius: 12px; font-weight: 700; }
 
   /* ===== Section modal (KPIs / Dialer / SMS Templates) ===== */
@@ -72,10 +73,12 @@
   .section-modal-overlay.open { display: flex; }
   .section-modal-card { background: linear-gradient(180deg,#1e3a5f,#182c49); border: 1px solid #2a4a73; border-radius: 18px; width: 100%; max-width: 760px; max-height: 92vh; display: flex; flex-direction: column; box-shadow: 0 24px 64px rgba(0,0,0,.5); }
   .section-modal-header { display: flex; align-items: center; justify-content: flex-end; padding: 12px 16px 0; flex-shrink: 0; }
-  .section-modal-close { background: none; border: none; color: #8a97a8; font-size: 20px; cursor: pointer; border-radius: 8px; padding: 6px 12px; font-family: inherit; }
+  .section-modal-close { background: none; border: none; color: #8a97a8; font-size: 20px; cursor: pointer; border-radius: 8px; padding: 6px 12px; font-family: inherit; min-width: 44px; min-height: 44px; display: inline-flex; align-items: center; justify-content: center; }
   .section-modal-close:hover { color: #fff; background: rgba(255,255,255,.06); }
   .section-modal-body { padding: 4px 22px 24px; overflow-y: auto; }
   .header-icon-btn.active { border-color: #d4a843 !important; color: #e8c476 !important; }
+  /* Header icon buttons (Dialer / KPIs / SMS Templates) */
+  .icon-btn { display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; border-radius: 12px; font-size: 20px; padding: 0 !important; flex-shrink: 0; }
   @media (max-width: 640px) {
     .section-modal-overlay { padding: 0; align-items: flex-end; }
     .section-modal-card { max-width: 100%; max-height: 94vh; border-radius: 18px 18px 0 0; }
@@ -127,8 +130,9 @@
   .buyer-card {
     background: linear-gradient(180deg, #1e3a5f, #1a3355); border: 1px solid #2a4a73; border-radius: 16px;
     padding: 14px 16px; margin-bottom: 12px; box-shadow: 0 4px 14px rgba(0,0,0,.35); cursor: pointer;
+    transition: transform .18s ease, border-color .18s ease;
   }
-  .buyer-card:hover { border-color: rgba(212,168,67,.4); }
+  .buyer-card:hover { border-color: rgba(212,168,67,.4); transform: translateY(-2px); }
   .buyer-top { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
   .buyer-name { font-weight: 800; font-size: 16px; }
   .buyer-type { font-size: 11px; font-weight: 700; padding: 3px 10px; border-radius: 20px; background: rgba(143,192,228,.12); color: #8fc0e4; border: 1px solid rgba(143,192,228,.4); }
@@ -226,7 +230,8 @@
     .header.header-hidden { transform: translateY(-110%); opacity: 0; pointer-events: none; }
     .brand h1 { font-size: 19px; }
     .content { padding: 14px 12px calc(60px + env(safe-area-inset-bottom)); }
-    .tabs { overflow-x: auto; }
+    .tabs { overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
+    .tabs::-webkit-scrollbar { display: none; }
     .tab-btn { padding: 12px 14px; font-size: 14px; flex: 0 0 auto; }
     .form-grid { grid-template-columns: 1fr; }
     .form-field input, .form-field select, .form-field textarea { font-size: 16px; padding: 13px 12px; }
@@ -234,6 +239,34 @@
     .deal-numbers { gap: 10px; }
     .call-link { min-height: 48px; display: inline-flex; align-items: center; font-size: 17px; }
     .num-grid { grid-template-columns: 1fr 1fr; }
+    /* Deal cards: action icons wrap below the numbers on narrow screens */
+    .deal-card .deal-row { flex-wrap: wrap; }
+    /* All small icon buttons -> 44px touch targets */
+    .deal-card button[title], .match-row button[title] { min-width: 44px !important; min-height: 44px !important; }
+    /* Clickable stage badge: bigger tap area */
+    .stage-badge { padding: 7px 14px; }
+    /* Detail cards: tighter padding, readable headings */
+    .detail-card { padding: 16px; }
+    .detail-card h2 { font-size: 19px; }
+    /* Offers / Page Views popup -> bottom sheet */
+    #popup-overlay { padding: 0 !important; align-items: flex-end !important; }
+    #popup-content { border-radius: 18px 18px 0 0 !important; max-height: 92vh !important; padding: 20px 16px 36px !important; }
+    #popup-content .btn-ghost { min-height: 44px; min-width: 44px; }
+    /* iOS zoom prevention: every form control 16px+ */
+    #email-blast input, #email-blast select, #email-blast textarea,
+    #sms-blast input, #sms-blast select, #sms-blast textarea,
+    .dd-notes textarea, #dialer-note, #note-input, #mao-pct,
+    #bs-notes, #sbf-notes, .search-wrap input,
+    .drive-link-row input, .dd-filter select { font-size: 16px !important; }
+    /* Radio groups in blast composers: bigger rows + radios */
+    #email-blast label, #sms-blast label { font-size: 15px !important; padding: 10px 0; display: block; }
+    #email-blast input[type="radio"], #sms-blast input[type="radio"] { width: 20px; height: 20px; vertical-align: -4px; }
+    /* Dialer: keep the big call button dominant, tighten top bar */
+    .dd-top { gap: 8px; }
+    .dd-progress { font-size: 13px; }
+    .dd-call { font-size: 20px; padding: 18px 12px; }
+    /* Section modal body: less side padding on phones */
+    .section-modal-body { padding: 4px 14px 24px; }
   }
   /* ===== DispoHub Dialer (single-column: card top, notes + dispos below) ===== */
   .dd-wrap { max-width: 560px; margin: 0 auto; }
@@ -255,9 +288,11 @@
   .dd-outcome-grid { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; }
   .dd-outcome { flex: 1 1 30%; min-width: 140px; background: rgba(255,255,255,.03); border: 1px solid #2f4d78; color: #e9edf3; border-radius: 12px; padding: 15px 10px; font-size: 14px; font-weight: 600; cursor: pointer; font-family: inherit; min-height: 56px; }
   .dd-outcome:active { background: rgba(212,168,67,.15); border-color: #d4a843; }
+  .dd-outcome:hover { background: rgba(212,168,67,.1); border-color: rgba(212,168,67,.5); }
   .dd-nav-row { display: flex; gap: 10px; margin: 0 0 14px; }
   .dd-nav-btn { flex: 1; min-height: 52px; border-radius: 12px; font-size: 16px; font-weight: 700; background: rgba(18,37,64,.85); border: 1px solid #2f4d78; color: #9aa7ba; cursor: pointer; font-family: inherit; }
   .dd-nav-btn:active { border-color: #d4a843; color: #e8c476; }
+  .dd-nav-btn:hover { border-color: rgba(212,168,67,.5); color: #e8c476; }
   .dd-done { text-align: center; padding: 48px 20px; }
   .dd-filter { display: flex; gap: 10px; margin-bottom: 14px; align-items: center; flex-wrap: wrap; }
   .dd-filter select { flex: 1; min-width: 180px; background: #0d1b2e; color: #e9edf3; border: 1px solid #2f4d78; border-radius: 10px; padding: 12px; font-size: 15px; font-family: inherit; }
