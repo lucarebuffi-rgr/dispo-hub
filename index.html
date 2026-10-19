@@ -1154,21 +1154,13 @@ async function openDeal(id) {
               const curIdx = stages.indexOf(pipe);
               const smsStep = (b && b.smsStepByDeal && b.smsStepByDeal[id]) || (smsSent ? 1 : 0);
               const cadenceSteps = [
-                { n: 'SMS 1', done: smsStep >= 1 },
-                { n: 'Day 1', done: smsStep >= 2 },
-                { n: 'Day 2', done: smsStep >= 3 },
-                { n: 'Day 4', done: smsStep >= 4 }
+                { n: 'Intro', done: smsStep >= 1 },
+                { n: 'Call 1', done: smsStep >= 2 },
+                { n: 'Call 2', done: smsStep >= 3 },
+                { n: 'Call 3', done: smsStep >= 4 }
               ];
               return `
               <div onclick="event.stopPropagation()" style="margin-top:8px;">
-                <div style="font-size:10px;color:#5c6b82;margin-bottom:4px;letter-spacing:.08em;">DEAL PIPELINE</div>
-                <div style="display:flex;align-items:center;gap:4px;">
-                ${stages.map((s, i) => `
-                  <div title="${pipeLabels[s]}" style="width:22px;height:22px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;${i <= curIdx && curIdx >= 0 ? 'background:' + (pipeColors[s] || '#d4a843') + ';color:#0d1b2a;' : 'background:#1a2a42;color:#5c6b82;'}">${i+1}</div>
-                  ${i < stages.length - 1 ? `<div style="width:8px;height:2px;background:${i < curIdx ? (pipeColors[stages[i+1]] || '#d4a843') : '#1a2a42'};"></div>` : ''}
-                `).join('')}
-                </div>
-                <div style="font-size:10px;color:#5c6b82;margin:8px 0 4px;letter-spacing:.08em;">OUTREACH</div>
                 <div style="display:flex;align-items:center;gap:4px;">
                 ${cadenceSteps.map((c, i) => `
                   <div title="${c.n}" style="padding:3px 8px;border-radius:12px;font-size:10px;font-weight:700;${c.done ? 'background:#2c5a36;color:#7fc98f;' : i === 0 || cadenceSteps[i-1].done ? 'background:#e8b84b;color:#0d1b2a;' : 'background:#1a2a42;color:#5c6b82;'}">${c.n}</div>
@@ -1221,21 +1213,13 @@ async function openDeal(id) {
               const curIdx = stages.indexOf(pipe);
               const smsStep = (b && b.smsStepByDeal && b.smsStepByDeal[id]) || (typeof smsSentAP !== 'undefined' && smsSentAP ? 1 : 0);
               const cadenceSteps = [
-                { n: 'SMS 1', done: smsStep >= 1 },
-                { n: 'Day 1', done: smsStep >= 2 },
-                { n: 'Day 2', done: smsStep >= 3 },
-                { n: 'Day 4', done: smsStep >= 4 }
+                { n: 'Intro', done: smsStep >= 1 },
+                { n: 'Call 1', done: smsStep >= 2 },
+                { n: 'Call 2', done: smsStep >= 3 },
+                { n: 'Call 3', done: smsStep >= 4 }
               ];
               return `
               <div onclick="event.stopPropagation()" style="margin-top:8px;">
-                <div style="font-size:10px;color:#5c6b82;margin-bottom:4px;letter-spacing:.08em;">DEAL PIPELINE</div>
-                <div style="display:flex;align-items:center;gap:4px;">
-                ${stages.map((s, i) => `
-                  <div title="${pipeLabels[s]}" style="width:22px;height:22px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;${i <= curIdx && curIdx >= 0 ? 'background:' + (pipeColors[s] || '#d4a843') + ';color:#0d1b2a;' : 'background:#1a2a42;color:#5c6b82;'}">${i+1}</div>
-                  ${i < stages.length - 1 ? `<div style="width:8px;height:2px;background:${i < curIdx ? (pipeColors[stages[i+1]] || '#d4a843') : '#1a2a42'};"></div>` : ''}
-                `).join('')}
-                </div>
-                <div style="font-size:10px;color:#5c6b82;margin:8px 0 4px;letter-spacing:.08em;">OUTREACH</div>
                 <div style="display:flex;align-items:center;gap:4px;">
                 ${cadenceSteps.map((c, i) => `
                   <div title="${c.n}" style="padding:3px 8px;border-radius:12px;font-size:10px;font-weight:700;${c.done ? 'background:#2c5a36;color:#7fc98f;' : i === 0 || cadenceSteps[i-1].done ? 'background:#e8b84b;color:#0d1b2a;' : 'background:#1a2a42;color:#5c6b82;'}">${c.n}</div>
