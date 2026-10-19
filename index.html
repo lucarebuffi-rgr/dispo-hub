@@ -3079,7 +3079,7 @@ function openBuyer(id) {
     <div class="detail-card">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap;">
         <div>
-          <h2>${esc(b.name)}</h2>
+          ${(() => { const pn = [b.firstName, b.lastName].filter(Boolean).join(' '); return pn ? `<h2>${esc(pn)}</h2><div style="font-size:14px;color:#8a97a8;margin-top:2px;">${esc(b.name || '')}</div>` : `<h2>${esc(b.name)}</h2>`; })()}
           <div class="addr-sub">${esc(b.type || '')}${b.mailingAddress ? ' · ' + esc(b.mailingAddress) : ''}</div>
         </div>
         ${b.status === 'inactive' ? '<span class="inactive-tag">Inactive</span>' : ''}
