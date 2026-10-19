@@ -1144,6 +1144,34 @@ async function openDeal(id) {
               <option value="">Set deal status…</option>
               ${Object.entries(pipeLabels).map(([v, l]) => `<option value="${v}"${pipe === v ? ' selected' : ''}>${l}</option>`).join('')}
             </select></div>` : ''}
+            ${(() => {
+              const stages = ['interested', 'viewing', 'walkthrough', 'offer', 'assigned'];
+              const curIdx = stages.indexOf(pipe);
+              const smsStep = (b && b.smsStepByDeal && b.smsStepByDeal[id]) || (smsSent ? 1 : 0);
+              const cadenceSteps = [
+                { n: 'SMS 1', done: smsStep >= 1 },
+                { n: 'Day 1', done: smsStep >= 2 },
+                { n: 'Day 2', done: smsStep >= 3 },
+                { n: 'Day 4', done: smsStep >= 4 }
+              ];
+              return `
+              <div onclick="event.stopPropagation()" style="margin-top:8px;">
+                <div style="font-size:10px;color:#5c6b82;margin-bottom:4px;letter-spacing:.08em;">DEAL PIPELINE</div>
+                <div style="display:flex;align-items:center;gap:4px;">
+                ${stages.map((s, i) => `
+                  <div title="${pipeLabels[s]}" style="width:22px;height:22px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;${i <= curIdx && curIdx >= 0 ? 'background:' + (pipeColors[s] || '#d4a843') + ';color:#0d1b2a;' : 'background:#1a2a42;color:#5c6b82;'}">${i+1}</div>
+                  ${i < stages.length - 1 ? `<div style="width:8px;height:2px;background:${i < curIdx ? (pipeColors[stages[i+1]] || '#d4a843') : '#1a2a42'};"></div>` : ''}
+                `).join('')}
+                </div>
+                <div style="font-size:10px;color:#5c6b82;margin:8px 0 4px;letter-spacing:.08em;">OUTREACH</div>
+                <div style="display:flex;align-items:center;gap:4px;">
+                ${cadenceSteps.map((c, i) => `
+                  <div title="${c.n}" style="padding:3px 8px;border-radius:12px;font-size:10px;font-weight:700;${c.done ? 'background:#2c5a36;color:#7fc98f;' : i === 0 || cadenceSteps[i-1].done ? 'background:#e8b84b;color:#0d1b2a;' : 'background:#1a2a42;color:#5c6b82;'}">${c.n}</div>
+                  ${i < cadenceSteps.length - 1 ? `<div style="width:6px;height:2px;background:${c.done ? '#2c5a36' : '#1a2a42'};"></div>` : ''}
+                `).join('')}
+                </div>
+              </div>`;
+            })()}
           </div>
           <div style="display:flex;gap:6px;align-items:center;flex-shrink:0;" onclick="event.stopPropagation()">
             ${bid ? iconBtn(`openSingleEmail('${bid}')`, 'Email this buyer', '📧🚀', !email) : ''}
@@ -1167,13 +1195,49 @@ async function openDeal(id) {
         const addr = (b && b.boughtPropertyAddress) || pb.boughtPropertyAddress || pb.purchaseAddress || '';
         const price = (b && b.boughtPropertyPrice) || pb.boughtPropertyPrice || (pb.soldPrice ? String(pb.soldPrice) : '');
         const email = (b && b.email) || '';
+        const pipe = (b && b.dealPipeline && b.dealPipeline[id]) || '';
+        const pipeColors = { 'interested': '#7fb3ff', 'viewing': '#e8b84b', 'walkthrough': '#c9a0ff', 'offer': '#7fc98f', 'assigned': '#e8b84b' };
+        const pipeLabels = { 'interested': 'Interested', 'viewing': 'Viewing', 'walkthrough': 'Walkthrough Scheduled', 'offer': 'Offer Submitted', 'assigned': 'Assigned' };
+        const bid = b ? b.id : null;
         return `
         <div class="match-row"${b ? ` onclick="openBuyer('${b.id}')" style="cursor:pointer;"` : ''}>
           <div class="match-info">
-            <div class="n">${esc(nm)}</div>
+            <div class="n">${esc(nm)}${pipe ? ` <span style="font-size:11px;font-weight:700;color:${pipeColors[pipe] || '#8a97a8'};background:rgba(255,255,255,.06);border-radius:12px;padding:2px 8px;margin-left:4px;">${pipeLabels[pipe] || pipe}</span>` : ''}</div>
             ${person ? `<div class="w" style="color:#e8c476;">👤 ${esc(person)}</div>` : ''}
             <div class="w">${addr ? '📍 ' + esc(addr) : ''}${addr && price ? ' · ' : ''}${price ? '💰 ' + esc(price) : ''}${!addr && !price ? '—' : ''}</div>
             ${email ? `<div class="w">✉️ <a href="mailto:${esc(email)}" onclick="event.stopPropagation()" style="color:#7fb3ff;">${esc(email)}</a></div>` : ''}
+            ${bid ? `<div onclick="event.stopPropagation()" style="margin-top:6px;"><select onchange="setBuyerDealPipeline('${bid}', '${id}', this.value)" style="font-size:12px;padding:6px 8px;border-radius:8px;border:1px solid #22385a;background:#0b1626;color:#e9edf3;min-height:36px;">
+              <option value="">Set deal status…</option>
+              ${Object.entries(pipeLabels).map(([v, l]) => `<option value="${v}"${pipe === v ? ' selected' : ''}>${l}</option>`).join('')}
+            </select></div>` : ''}
+            ${(() => {
+              const stages = ['interested', 'viewing', 'walkthrough', 'offer', 'assigned'];
+              const curIdx = stages.indexOf(pipe);
+              const smsStep = (b && b.smsStepByDeal && b.smsStepByDeal[id]) || (smsSent ? 1 : 0);
+              const cadenceSteps = [
+                { n: 'SMS 1', done: smsStep >= 1 },
+                { n: 'Day 1', done: smsStep >= 2 },
+                { n: 'Day 2', done: smsStep >= 3 },
+                { n: 'Day 4', done: smsStep >= 4 }
+              ];
+              return `
+              <div onclick="event.stopPropagation()" style="margin-top:8px;">
+                <div style="font-size:10px;color:#5c6b82;margin-bottom:4px;letter-spacing:.08em;">DEAL PIPELINE</div>
+                <div style="display:flex;align-items:center;gap:4px;">
+                ${stages.map((s, i) => `
+                  <div title="${pipeLabels[s]}" style="width:22px;height:22px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;${i <= curIdx && curIdx >= 0 ? 'background:' + (pipeColors[s] || '#d4a843') + ';color:#0d1b2a;' : 'background:#1a2a42;color:#5c6b82;'}">${i+1}</div>
+                  ${i < stages.length - 1 ? `<div style="width:8px;height:2px;background:${i < curIdx ? (pipeColors[stages[i+1]] || '#d4a843') : '#1a2a42'};"></div>` : ''}
+                `).join('')}
+                </div>
+                <div style="font-size:10px;color:#5c6b82;margin:8px 0 4px;letter-spacing:.08em;">OUTREACH</div>
+                <div style="display:flex;align-items:center;gap:4px;">
+                ${cadenceSteps.map((c, i) => `
+                  <div title="${c.n}" style="padding:3px 8px;border-radius:12px;font-size:10px;font-weight:700;${c.done ? 'background:#2c5a36;color:#7fc98f;' : i === 0 || cadenceSteps[i-1].done ? 'background:#e8b84b;color:#0d1b2a;' : 'background:#1a2a42;color:#5c6b82;'}">${c.n}</div>
+                  ${i < cadenceSteps.length - 1 ? `<div style="width:6px;height:2px;background:${c.done ? '#2c5a36' : '#1a2a42'};"></div>` : ''}
+                `).join('')}
+                </div>
+              </div>`;
+            })()}
           </div>
           ${b && b.phone ? `<a class="call-link match-call" href="tel:${digitsOnly(b.phone)}" onclick="event.stopPropagation();logDispoDialClick('${b.id}','${d.id}')">📞</a>` : `<span style="font-size:12px;color:#5c6b82;">${b ? 'no phone' : ''}</span>`}
         </div>`;
