@@ -143,6 +143,7 @@
   .buyer-stats { display: flex; gap: 14px; margin-top: 8px; font-size: 12px; color: #8a97a8; flex-wrap: wrap; }
   .buyer-stats b { color: #e8c476; }
   .inactive-tag { font-size: 11px; font-weight: 700; padding: 3px 10px; border-radius: 20px; background: rgba(217,83,79,.12); color: #e07a77; border: 1px solid rgba(217,83,79,.4); }
+  .vip-tag { display:inline-block;font-size:11px;font-weight:700;color:#0d1b2a;background:linear-gradient(135deg,#e8b84b,#d4a843);border-radius:20px;padding:3px 10px;margin-left:6px; }
 
   /* ===== Detail view ===== */
   .detail-wrap { max-width: 720px; margin: 0 auto; }
@@ -685,16 +686,24 @@ function renderDeals() {
 }
 
 /* ================= Buyers view ================= */
+let buyerStatusFilter = 'all';
+function setBuyerStatusFilter(s) { buyerStatusFilter = s; renderBuyers(); }
 function renderBuyers() {
   const q = buyerSearch.toLowerCase();
-  const list = buyers.filter(b =>
-    !q || [b.name, b.firstName, b.lastName, b.buyingCity, b.buyingCounty, b.buyingZip, b.buyBox, b.phone, b.boughtPropertyAddress].join(' ').toLowerCase().includes(q)
-  );
+  const list = buyers.filter(b => {
+    if (buyerStatusFilter === 'vip' && b.status !== 'vip') return false;
+    if (buyerStatusFilter === 'active' && (b.status || 'active') !== 'active') return false;
+    if (buyerStatusFilter === 'inactive' && b.status !== 'inactive') return false;
+    return !q || [b.name, b.firstName, b.lastName, b.buyingCity, b.buyingCounty, b.buyingZip, b.buyBox, b.phone, b.boughtPropertyAddress].join(' ').toLowerCase().includes(q);
+  });
   $('buyers-pill').textContent = buyers.length;
   let html = `<div class="toolbar">
     <div class="search-wrap"><span>🔍</span><input id="buyer-search" placeholder="Search buyers, city, ZIP, buy box…" value="${esc(buyerSearch)}"></div>
-    <button class="btn-ghost" onclick="importBuyers()">📥 Import from Sheet</button>
-    <button class="btn-gold" onclick="showBuyerForm()">+ Add Buyer</button>
+    <button class="btn-ghost" onclick="importBuyers()">📥 Import</button>
+    <button class="btn-gold" onclick="showBuyerForm()">+ Add</button>
+  </div>
+  <div style="display:flex;gap:8px;margin:0 0 12px;flex-wrap:wrap;">
+    ${['all', 'vip', 'active', 'inactive'].map(s => `<button class="btn-ghost" style="min-height:40px;padding:6px 14px;font-size:13px;${(buyerStatusFilter||'all')===s?'border-color:#d4a843;color:#e8c476;background:rgba(212,168,67,.12);':''}" onclick="setBuyerStatusFilter('${s}')">${s==='all'?'All':s==='vip'?'⭐ VIP':s==='active'?'Active':'Inactive'}</button>`).join('')}
   </div>`;
   if (!list.length) {
     html += `<div class="empty-state">${buyers.length ? 'No buyers match that search.' : 'No buyers yet — import from your sheet or add one manually.'}</div>`;
@@ -706,6 +715,7 @@ function renderBuyers() {
         <div class="buyer-top">
           <span class="buyer-name">${esc(personName || b.name)}</span>
           <span class="buyer-type ${b.type === 'LLC' ? 'llc' : ''}">${esc(b.type || '—')}</span>
+          ${b.status === 'vip' ? '<span class="vip-tag">⭐ VIP</span>' : ''}
           ${b.status === 'inactive' ? '<span class="inactive-tag">Inactive</span>' : ''}
         </div>
         ${personName && b.name && personName !== b.name ? `<div style="font-size:12px;color:#8a97a8;margin:-4px 0 8px;">${esc(b.name)}</div>` : ''}
@@ -2300,7 +2310,7 @@ function renderDealDialer() {
   const item = dialer.queue[dialer.idx];
   const b = item.buyer;
   const prev = dialer.outcomes[b.id];
-  const outs = ['Interested', 'Made Offer', 'Follow-up', 'No Answer', 'Not Interested', 'Bad Number'];
+  const outs = ['Interested', 'Made Offer', 'Follow-up', 'No Answer', 'Not Interested', 'Bad Number', 'Inactive'];
   document.body.insertAdjacentHTML('beforeend', `
   <div id="dispo-dialer" style="position:fixed;inset:0;z-index:2000;background:#0a1423;display:flex;flex-direction:column;">
     <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 16px;border-bottom:1px solid #16283f;">
@@ -2324,6 +2334,23 @@ function renderDealDialer() {
           : '<div style="color:#e07a77;font-weight:700;margin:18px 0;">⚠️ No phone — needs skip trace</div>'}
         ${b.email ? `<div style="font-size:14px;color:#aeb9c7;">✉️ ${esc(b.email)}</div>` : ''}
       </div>
+      ${(() => {
+        const steps = [
+          { day: 1, label: 'Day 1 — Double Dial + VM + SMS #2', desc: 'Two rapid calls, leave voicemail, send SMS #2' },
+          { day: 2, label: 'Day 2 — Double Dial + SMS #3', desc: 'Two rapid calls, send SMS #3' },
+          { day: 4, label: 'Day 4 — Double Dial + VM + SMS #4', desc: 'Two rapid calls, leave voicemail, send SMS #4' }
+        ];
+        const curStep = Math.min((b.smsStepByDeal && b.smsStepByDeal[dialer.dealId]) || 1, 3);
+        const touchNum = Math.min(curStep, 3);
+        return `<div class="detail-card" style="background:rgba(18,37,64,.6);">
+          <div style="font-size:13px;color:#8a97a8;">Touch ${touchNum} of 3 · ${b.callAttempts || 0} calls</div>
+          <div style="font-size:15px;font-weight:700;color:#e8c476;margin:6px 0 2px;">👉 ${steps[touchNum-1].label}</div>
+          <div style="font-size:13px;color:#8a97a8;margin-bottom:10px;">${steps[touchNum-1].desc}</div>
+          <div style="display:flex;gap:8px;">
+            ${steps.map((s, i) => `<div style="width:36px;height:36px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700;${i+1 === touchNum ? 'background:#e8b84b;color:#0d1b2a;' : i+1 < touchNum ? 'background:#2c5a36;color:#7fc98f;' : 'background:#1a2a42;color:#5c6b82;'}">${i+1}</div>`).join('')}
+          </div>
+        </div>`;
+      })()}
       <div class="detail-card">
         <div class="section-label" style="margin-top:0;">Call Disposition</div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
@@ -2367,6 +2394,11 @@ async function persistDialerOutcome() {
   }, { merge: true });
   if (outcome === 'Bad Number') {
     await db.collection('dispoBuyers').doc(item.buyer.id).set({ status: 'needs_retrace' }, { merge: true });
+  }
+  if (outcome === 'Inactive') {
+    await db.collection('dispoBuyers').doc(item.buyer.id).set({ status: 'inactive' }, { merge: true });
+    const bi = buyers.findIndex(x => x.id === item.buyer.id);
+    if (bi >= 0) buyers[bi].status = 'inactive';
   }
 }
 async function dialerNext() {
@@ -3346,6 +3378,7 @@ function showBuyerForm(buyerId) {
         ${fld('lastVerified', 'Last verified', b.lastVerified, 'date')}
         <div class="form-field"><label>Status</label><select id="bf-status">
           <option value="active" ${(b.status || 'active') === 'active' ? 'selected' : ''}>Active</option>
+          <option value="vip" ${b.status === 'vip' ? 'selected' : ''}>⭐ VIP</option>
           <option value="inactive" ${b.status === 'inactive' ? 'selected' : ''}>Inactive</option>
         </select></div>
       </div>
@@ -3701,7 +3734,7 @@ async function ddApplyOutcome(outcomeId) {
     const day = b.dialDay || 1;
     if (outcomeId === 'no_answer') { upd.dialDay = ddNextDay(day); upd.dialNextDate = ddNextDue(day); }
     else if (outcomeId === 'interested') upd.dialStatus = 'interested';
-    else if (outcomeId === 'not_active') upd.dialStatus = 'paused';
+    else if (outcomeId === 'not_active') { upd.dialStatus = 'paused'; upd.status = 'inactive'; }
     else if (outcomeId === 'bad_number') upd.dialStatus = 'bad_number';
     else if (outcomeId === 'dnc') upd.dialStatus = 'dnc';
     await db.collection('dispoBuyers').doc(b.id).set(upd, { merge: true });
