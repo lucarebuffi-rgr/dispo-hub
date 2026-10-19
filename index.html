@@ -251,9 +251,9 @@
   </div>
   <div class="header-inner">
     <div class="tabs" style="border-bottom:none; margin: 10px 0 0;">
-      <button class="tab-btn active" data-tab="deals">📦 Deals <span class="pill" id="deals-pill">0</span></button>
-      <button class="tab-btn" data-tab="buyers">🤝 Buyers <span class="pill" id="buyers-pill">0</span></button>
-      <button class="tab-btn" data-tab="find">🔍 Find Buyers</button>
+      <button class="tab-btn active" data-tab="find">🔍 Find Buyers</button>
+      <button class="tab-btn" data-tab="buyers">🤝 All Buyers <span class="pill" id="buyers-pill">0</span></button>
+      <button class="tab-btn" data-tab="deals">📦 Deal Board <span class="pill" id="deals-pill">0</span></button>
       <button class="tab-btn" data-tab="kpis">📊 KPIs</button>
       <button class="tab-btn" data-tab="dialer">📞 Dialer <span class="pill" id="dialer-pill">0</span></button>
       <button class="tab-btn" data-tab="smstmpl">💬 SMS Templates</button>
@@ -700,7 +700,7 @@ document.querySelectorAll('.tab-btn').forEach(b => b.onclick = () => switchTab(b
   $('content').innerHTML = '<div class="empty-state">Loading…</div>';
   try { await loadAll(); } catch (e) { console.error(e); }
   loadSmsTemplates().catch(() => {}); // warm the SMS template cache (non-blocking)
-  switchTab('deals');
+  switchTab('find');
 })();
 
 /* ================= Deal form (add / edit) ================= */
