@@ -239,10 +239,15 @@
     .deal-numbers { gap: 10px; }
     .call-link { min-height: 48px; display: inline-flex; align-items: center; font-size: 17px; }
     .num-grid { grid-template-columns: 1fr 1fr; }
-    /* Deal cards: action icons wrap below the numbers on narrow screens */
-    .deal-card .deal-row { flex-wrap: wrap; }
+    /* Deal cards: clean stacked layout on mobile — icons in own row below */
+    .deal-card .deal-row { flex-direction: column !important; align-items: stretch !important; flex-wrap: nowrap !important; }
+    .deal-card .deal-top { flex-wrap: wrap; }
+    .deal-card .deal-addr { font-size: 17px; }
+    .deal-card .deal-numbers { display: grid !important; grid-template-columns: 1fr 1fr; gap: 8px; margin: 10px 0; }
+    .deal-card .deal-icons { display: flex; gap: 8px; justify-content: flex-start; margin-top: 12px; padding-top: 12px; border-top: 1px solid rgba(212,168,67,0.15); }
     /* All small icon buttons -> 44px touch targets */
     .deal-card button[title], .match-row button[title] { min-width: 44px !important; min-height: 44px !important; }
+    .deal-card .deal-icons button { width: 44px !important; height: 44px !important; font-size: 18px !important; }
     /* Clickable stage badge: bigger tap area */
     .stage-badge { padding: 7px 14px; }
     /* Detail cards: tighter padding, readable headings */
@@ -643,7 +648,7 @@ function renderDeals() {
             <span>📞 <span class="mono" data-offers="${d.id}">…</span> offers</span>
           </div>
           </div>
-          <div style="display:flex;gap:6px;align-items:center;flex-shrink:0;" onclick="event.stopPropagation();">
+          <div class="deal-icons" style="display:flex;gap:6px;align-items:center;flex-shrink:0;" onclick="event.stopPropagation();">
             <button onclick="event.stopPropagation();openEmailBlast('${d.id}')" title="Email Blast" style="background:rgba(200,147,42,0.15);border:1px solid rgba(200,147,42,0.4);border-radius:10px;width:36px;height:36px;font-size:16px;cursor:pointer;">📧🚀</button>
             <button onclick="event.stopPropagation();openSmsBlast('${d.id}')" title="SMS Blast" style="background:rgba(200,147,42,0.15);border:1px solid rgba(200,147,42,0.4);border-radius:10px;width:36px;height:36px;font-size:16px;cursor:pointer;">💬🚀</button>
             <button onclick="event.stopPropagation();startDialer('${d.id}')" title="Dialer" style="background:rgba(200,147,42,0.15);border:1px solid rgba(200,147,42,0.4);border-radius:10px;width:36px;height:36px;font-size:18px;cursor:pointer;">📞</button>
