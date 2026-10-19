@@ -1506,8 +1506,12 @@ async function renderBuyerSearch() {
       </div>
       <button class="btn-gold" style="width:100%;min-height:52px;margin-top:14px;font-size:16px;" onclick="submitBuyerSearch()">🔍 Request Buyer Search</button>
     </div>
-    <div class="section-label">Search history (${searches.length})</div>
-    <div id="search-list">
+    <div class="detail-card" style="padding:14px 16px;">
+      <h2 style="font-size:18px;cursor:pointer;user-select:none;margin:0;" onclick="document.getElementById('search-list').style.display = document.getElementById('search-list').style.display === 'none' ? 'block' : 'none'; this.querySelector('.toggle-arrow').textContent = document.getElementById('search-list').style.display === 'none' ? '▶' : '▼';">
+        <span class="toggle-arrow">▶</span> Search history <span style="color:#8a97a8;font-size:13px;font-weight:400;">(${searches.length})</span>
+      </h2>
+    </div>
+    <div id="search-list" style="display:none;">
       ${searches.length ? searches.map(s => `
         <div class="buyer-card search-card" onclick="openBuyerSearch('${s.id}')">
           <div class="buyer-top">
@@ -2537,8 +2541,7 @@ async function openSingleEmail(buyerId) {
   if (!b || !b.email) { showToast('No email on this buyer'); return; }
   singleEmailBuyerId = buyerId;
   ensureGmailAuth().catch(e => console.warn('gmail pre-auth:', e.message));
-  const opts = deals.filter(dd => !['dead', 'closed'].includes(dd.stage))
-    .map(dd => '<option value="' + dd.id + '">' + esc(dd.address) + '</option>').join('');
+  const opts = dealOptionsHTML(await relevantDealsForBuyer(b));
   blastRun = null;
   closeEmailOverlay();
   document.body.insertAdjacentHTML('beforeend', `
@@ -2588,6 +2591,33 @@ async function sendSingleEmail(buyerId) {
     if (btn) { btn.disabled = false; btn.textContent = '🚀 Send Now'; }
   }
 }
+/* ---------------- Relevant deals for one-off outreach ---------------- */
+// A deal qualifies for a buyer's one-off Text/Email picker if:
+//  1. its stage is active (not dead/closed/assigned), AND
+//  2a. the buyer was pulled for it via InvestorBase (dispoBuyerSearchResults buyerId+dealId), OR
+//  2b. territory match: deal.city == buyer.buyingCity OR deal.county == buyer.buyingCounty (case-insensitive).
+// Note: buyer docs carry no state field, so no state half to the match — city/county is the territory signal.
+const INACTIVE_STAGES = ['dead', 'closed', 'assigned'];
+function normStr(s) { return String(s || '').trim().toLowerCase(); }
+async function relevantDealsForBuyer(b) {
+  const active = deals.filter(d => !INACTIVE_STAGES.includes(normStr(d.stage)));
+  if (!b) return active;
+  const pulledDealIds = new Set();
+  try {
+    const snap = await db.collection('dispoBuyerSearchResults').where('buyerId', '==', b.id).get();
+    snap.forEach(doc => { const did = (doc.data() || {}).dealId; if (did) pulledDealIds.add(did); });
+  } catch (e) { console.warn('relevantDealsForBuyer pull lookup failed:', e.message); }
+  const bCity = normStr(b.buyingCity), bCounty = normStr(b.buyingCounty);
+  return active.filter(d => {
+    if (pulledDealIds.has(d.id)) return true;
+    const dCity = normStr(d.city), dCounty = normStr(d.county);
+    return (bCity && dCity === bCity) || (bCounty && dCounty === bCounty);
+  });
+}
+function dealOptionsHTML(list) {
+  if (!list || !list.length) return '<option value="">No matching active deals for this buyer</option>';
+  return list.map(dd => '<option value="' + dd.id + '">' + esc(dd.address) + '</option>').join('');
+}
 /* ---------------- Blast duplicate prevention ---------------- */
 // Map of buyerId -> latest ISO timestamp they were contacted for this deal,
 // from bulk blasts (buyerIds arrays) and one-off sends (buyerId field).
@@ -2616,8 +2646,7 @@ async function openSingleSms(buyerId) {
   const b = buyers.find(x => x.id === buyerId);
   if (!b || !b.phone) { showToast('No phone on this buyer'); return; }
   singleSmsBuyerId = buyerId;
-  const opts = deals.filter(dd => !['dead', 'closed'].includes(dd.stage))
-    .map(dd => '<option value="' + dd.id + '">' + esc(dd.address) + '</option>').join('');
+  const opts = dealOptionsHTML(await relevantDealsForBuyer(b));
   smsRun = null;
   closeSmsOverlay();
   document.body.insertAdjacentHTML('beforeend', `
