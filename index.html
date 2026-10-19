@@ -467,6 +467,17 @@ async function loadAll() {
 async function logActivity(dealId, text) {
   await db.collection('dispoActivity').add({ dealId, text, at: new Date().toISOString() });
 }
+/* Log a tap on any phone number (tel: link) — fire-and-forget, never blocks the dial. */
+function logDispoDialClick(buyerId, dealId) {
+  try {
+    db.collection('dispoActivity').add({
+      type: 'dial_clicked',
+      buyerId: buyerId || null,
+      dealId: (dealId && dealId !== 'all') ? dealId : null,
+      at: new Date().toISOString()
+    }).catch(() => {});
+  } catch (e) { /* never block the dial */ }
+}
 async function getActivity(dealId) {
   const snap = await db.collection('dispoActivity').where('dealId', '==', dealId).get();
   return snap.docs.map(d => d.data()).sort((a, b) => tsStr(b.at).localeCompare(tsStr(a.at)));
@@ -621,7 +632,7 @@ function renderBuyers() {
         </div>
         ${personName && b.name && personName !== b.name ? `<div style="font-size:12px;color:#8a97a8;margin:-4px 0 8px;">${esc(b.name)}</div>` : ''}
         <div class="buyer-contact">
-          ${b.phone ? `<a class="call-link" href="tel:${digitsOnly(b.phone)}" onclick="event.stopPropagation()">📞 ${esc(formatPhone(b.phone))}</a>` : '<span style="color:#5c6b82;font-size:13px;">No phone — needs skip trace</span>'}
+          ${b.phone ? `<a class="call-link" href="tel:${digitsOnly(b.phone)}" onclick="event.stopPropagation();logDispoDialClick('${b.id}',null)">📞 ${esc(formatPhone(b.phone))}</a>` : '<span style="color:#5c6b82;font-size:13px;">No phone — needs skip trace</span>'}
           ${b.email ? `<span style="font-size:13px;color:#aeb9c7;">✉️ ${esc(b.email)}</span>` : ''}
         </div>
         <div class="buyer-buybox">🎯 ${esc(b.buyBox || 'No buy box recorded')}</div>
@@ -976,7 +987,7 @@ async function openDeal(id) {
       </div>
       <div class="section-label">Specs</div>
       <div style="font-size:14px;color:#aeb9c7;">${esc(d.beds || '—')} bd · ${esc(d.baths || '—')} ba · ${d.sqft ? (+d.sqft).toLocaleString() + ' sqft' : '—'} · ${esc(d.propertyType || '—')}${d.yearBuilt ? ' · Built ' + esc(d.yearBuilt) : ''}</div>
-      ${d.sellerName || d.sellerPhone ? `<div class="section-label">Seller</div><div style="font-size:14px;">${esc(d.sellerName || '')} ${d.sellerPhone ? `· <a class="call-link" href="tel:${digitsOnly(d.sellerPhone)}">📞 ${esc(formatPhone(d.sellerPhone))}</a>` : ''}</div>` : ''}
+      ${d.sellerName || d.sellerPhone ? `<div class="section-label">Seller</div><div style="font-size:14px;">${esc(d.sellerName || '')} ${d.sellerPhone ? `· <a class="call-link" href="tel:${digitsOnly(d.sellerPhone)}" onclick="logDispoDialClick(null,'${d.id}')">📞 ${esc(formatPhone(d.sellerPhone))}</a>` : ''}</div>` : ''}
       ${d.notes ? `<div class="section-label">Notes</div><div style="font-size:14px;color:#aeb9c7;line-height:1.6;white-space:pre-wrap;">${esc(d.notes)}</div>` : ''}
       <div class="section-label">Photos</div>
       <div class="photo-section">
@@ -1069,7 +1080,7 @@ async function openDeal(id) {
             <div class="w">${addr ? '📍 ' + esc(addr) : ''}${addr && price ? ' · ' : ''}${price ? '💰 ' + esc(price) : ''}${!addr && !price ? '—' : ''}</div>
             ${email ? `<div class="w">✉️ <a href="mailto:${esc(email)}" onclick="event.stopPropagation()" style="color:#7fb3ff;">${esc(email)}</a></div>` : ''}
           </div>
-          ${b && b.phone ? `<a class="call-link match-call" href="tel:${digitsOnly(b.phone)}" onclick="event.stopPropagation()">📞</a>` : `<span style="font-size:12px;color:#5c6b82;">${b ? 'no phone' : ''}</span>`}
+          ${b && b.phone ? `<a class="call-link match-call" href="tel:${digitsOnly(b.phone)}" onclick="event.stopPropagation();logDispoDialClick('${b.id}','${d.id}')">📞</a>` : `<span style="font-size:12px;color:#5c6b82;">${b ? 'no phone' : ''}</span>`}
         </div>`;
       }).join('') : '<div class="timeline-empty">No other pulled buyers — tap 🔍 Search For Buyers above to run a pull.</div>'}
       </div>
@@ -1940,7 +1951,7 @@ async function initDealBuyerMap(deal, pulledBuyers) {
       pts.push([lat, lng]);
       buyerPinCount++;
       const popup = '<b>' + esc(nm) + '</b>'
-        + (b && b.phone ? '<br>\uD83D\uDCDE <a href="tel:' + digitsOnly(b.phone) + '" style="color:#1a6fd4;font-weight:700;">' + esc(formatPhone(b.phone)) + '</a>' : '')
+        + (b && b.phone ? '<br>\uD83D\uDCDE <a href="tel:' + digitsOnly(b.phone) + '" onclick="logDispoDialClick(\'' + (b.id || '') + '\',\'' + deal.id + '\')" style="color:#1a6fd4;font-weight:700;">' + esc(formatPhone(b.phone)) + '</a>' : '')
         + (addr ? '<br>\uD83D\uDCCD ' + esc(addr) : '')
         + (price ? '<br>\uD83D\uDCB0 ' + esc(price) : '');
       L.marker([lat, lng], { icon: buyerDotIcon(buyerPinColor(b && b.type)) }).addTo(map).bindPopup(popup);
@@ -2203,7 +2214,7 @@ function renderDealDialer() {
         <div style="font-size:13px;color:#8a97a8;margin-top:4px;">${esc(item.why.join(' · '))}</div>
         ${b.buyBox ? `<div style="font-size:13px;color:#aeb9c7;font-style:italic;margin-top:8px;">🎯 ${esc(b.buyBox)}</div>` : ''}
         ${b.phone
-          ? `<a href="tel:${digitsOnly(b.phone)}" class="btn-gold" style="display:block;text-decoration:none;margin:18px 0 6px;min-height:60px;display:flex;align-items:center;justify-content:center;font-size:19px;">📞 ${esc(formatPhone(b.phone))}</a>`
+          ? `<a href="tel:${digitsOnly(b.phone)}" onclick="logDispoDialClick('${b.id}',dialer.dealId)" class="btn-gold" style="display:block;text-decoration:none;margin:18px 0 6px;min-height:60px;display:flex;align-items:center;justify-content:center;font-size:19px;">📞 ${esc(formatPhone(b.phone))}</a>`
           : '<div style="color:#e07a77;font-weight:700;margin:18px 0;">⚠️ No phone — needs skip trace</div>'}
         ${b.email ? `<div style="font-size:14px;color:#aeb9c7;">✉️ ${esc(b.email)}</div>` : ''}
       </div>
@@ -3215,7 +3226,7 @@ function openBuyer(id) {
         ${b.status === 'inactive' ? '<span class="inactive-tag">Inactive</span>' : ''}
       </div>
       <div style="display:flex;gap:10px;flex-wrap:wrap;margin:6px 0 4px;">
-        ${b.phone ? `<a class="btn-gold" href="tel:${digitsOnly(b.phone)}" style="text-decoration:none;">📞 ${esc(formatPhone(b.phone))}</a>` : '<span style="color:#e07a77;font-size:14px;font-weight:700;">⚠️ No phone — needs skip trace (DISPO MANAGER)</span>'}
+        ${b.phone ? `<a class="btn-gold" href="tel:${digitsOnly(b.phone)}" onclick="logDispoDialClick('${b.id}',null)" style="text-decoration:none;">📞 ${esc(formatPhone(b.phone))}</a>` : '<span style="color:#e07a77;font-size:14px;font-weight:700;">⚠️ No phone — needs skip trace (DISPO MANAGER)</span>'}
         ${b.email ? `<a class="btn-ghost" href="mailto:${esc(b.email)}" style="text-decoration:none;">✉️ Email</a>` : ''}
         ${b.email ? `<button class="btn-ghost" onclick="openSingleEmail('${b.id}')">📧 Deal Email</button>` : ''}
         ${b.phone ? `<button class="btn-ghost" onclick="openSingleSms('${b.id}')">📱 Text</button>` : ''}
@@ -3469,7 +3480,7 @@ function renderDialerMain() {
       ${b.boughtPropertyAddress ? `<div class="dd-row">🏠 <b>${esc(b.boughtPropertyAddress)}</b>${b.boughtPropertyPrice ? ' · ' + esc(b.boughtPropertyPrice) : ''}</div>` : ''}
       ${b.buyBox ? `<div class="dd-row">🎯 <i>${esc(b.buyBox)}</i></div>` : ''}
       ${b.lastDialDispo ? `<div class="dd-last">Last: ${esc(ddOutcomeLabel(b.lastDialDispo))}${b.lastDialAt ? ' · ' + esc(fmtDate(b.lastDialAt)) : ''}</div>` : ''}
-      <a class="dd-call" href="tel:${digits}">📞 ${esc(formatPhone(b.phone))}</a>
+      <a class="dd-call" href="tel:${digits}" onclick="logDispoDialClick('${b.id}',ddDealFilter)">📞 ${esc(formatPhone(b.phone))}</a>
     </div>
     <div class="dd-nav-row">
       <button class="dd-nav-btn" onclick="ddPrev()">‹ Prev</button>
