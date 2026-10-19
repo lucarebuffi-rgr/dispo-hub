@@ -66,6 +66,20 @@
   .tab-btn.active { color: #e8c476; border-bottom-color: #d4a843; }
   .tab-btn .pill { background: rgba(212,168,67,.14); color: #e8c476; font-size: 12px; padding: 2px 10px; border-radius: 12px; font-weight: 700; }
 
+  /* ===== Section modal (KPIs / Dialer / SMS Templates) ===== */
+  .section-modal-overlay { position: fixed; inset: 0; background: rgba(4,10,20,.82); display: none; align-items: center; justify-content: center; z-index: 1500; padding: 20px; backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px); }
+  .section-modal-overlay.open { display: flex; }
+  .section-modal-card { background: linear-gradient(180deg,#1e3a5f,#182c49); border: 1px solid #2a4a73; border-radius: 18px; width: 100%; max-width: 760px; max-height: 92vh; display: flex; flex-direction: column; box-shadow: 0 24px 64px rgba(0,0,0,.5); }
+  .section-modal-header { display: flex; align-items: center; justify-content: flex-end; padding: 12px 16px 0; flex-shrink: 0; }
+  .section-modal-close { background: none; border: none; color: #8a97a8; font-size: 20px; cursor: pointer; border-radius: 8px; padding: 6px 12px; font-family: inherit; }
+  .section-modal-close:hover { color: #fff; background: rgba(255,255,255,.06); }
+  .section-modal-body { padding: 4px 22px 24px; overflow-y: auto; }
+  .header-icon-btn.active { border-color: #d4a843 !important; color: #e8c476 !important; }
+  @media (max-width: 640px) {
+    .section-modal-overlay { padding: 0; align-items: flex-end; }
+    .section-modal-card { max-width: 100%; max-height: 94vh; border-radius: 18px 18px 0 0; }
+  }
+
   /* ===== Stage filter row ===== */
   .stage-row { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
   .stage-btn {
@@ -244,9 +258,9 @@
       <h1>DispoHub</h1>
     </div>
     <div class="header-actions">
-      <button class="btn-ghost icon-btn" onclick="switchTab('dialer')" title="Dialer">📞</button>
-      <button class="btn-ghost icon-btn" onclick="switchTab('kpis')" title="KPIs">📊</button>
-      <button class="btn-ghost icon-btn" onclick="switchTab('smstmpl')" title="SMS Templates">💬</button>
+      <button class="btn-ghost icon-btn header-icon-btn" id="hdr-dialer" onclick="openSectionModal('dialer')" title="Dialer">📞</button>
+      <button class="btn-ghost icon-btn header-icon-btn" id="hdr-kpis" onclick="openSectionModal('kpis')" title="KPIs">📊</button>
+      <button class="btn-ghost icon-btn header-icon-btn" id="hdr-smstmpl" onclick="openSectionModal('smstmpl')" title="SMS Templates">💬</button>
     </div>
   </div>
   <div class="header-inner">
@@ -254,9 +268,6 @@
       <button class="tab-btn active" data-tab="find">🔍 Find Buyers</button>
       <button class="tab-btn" data-tab="buyers">🤝 All Buyers <span class="pill" id="buyers-pill">0</span></button>
       <button class="tab-btn" data-tab="deals">📦 Deal Board <span class="pill" id="deals-pill">0</span></button>
-      <button class="tab-btn" data-tab="kpis">📊 KPIs</button>
-      <button class="tab-btn" data-tab="dialer">📞 Dialer <span class="pill" id="dialer-pill">0</span></button>
-      <button class="tab-btn" data-tab="smstmpl">💬 SMS Templates</button>
     </div>
   </div>
 </div>
@@ -660,17 +671,50 @@ async function importBuyers() {
   }
 }
 
+/* ================= Section modal (KPIs / Dialer / SMS Templates) ================= */
+let modalSection = null; // 'dialer' | 'kpis' | 'smstmpl' | null
+function sectionContentEl() {
+  return modalSection ? document.getElementById('section-modal-body') : document.getElementById('content');
+}
+function modalScrollTop() {
+  if (modalSection) document.getElementById('section-modal-body').scrollTop = 0;
+  else window.scrollTo(0, 0);
+}
+function openSectionModal(section) {
+  modalSection = section;
+  document.getElementById('section-modal-overlay').classList.add('open');
+  document.body.style.overflow = 'hidden';
+  ['dialer', 'kpis', 'smstmpl'].forEach(s => {
+    const btn = document.getElementById('hdr-' + s);
+    if (btn) btn.classList.toggle('active', s === section);
+  });
+  if (section === 'dialer') renderDialer();
+  else if (section === 'kpis') renderKPIs();
+  else if (section === 'smstmpl') renderSmsTemplates();
+  modalScrollTop();
+}
+function closeSectionModal() {
+  modalSection = null;
+  document.getElementById('section-modal-overlay').classList.remove('open');
+  document.body.style.overflow = '';
+  ['dialer', 'kpis', 'smstmpl'].forEach(s => {
+    const btn = document.getElementById('hdr-' + s);
+    if (btn) btn.classList.remove('active');
+  });
+}
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && modalSection) closeSectionModal();
+});
+
 /* ================= Tab switching + boot ================= */
 function switchTab(t) {
+  if (modalSection) closeSectionModal();
   tab = t; openDealId = null; openBuyerId = null;
   if (window._buyerMap) { try { window._buyerMap.remove(); } catch (e) {} window._buyerMap = null; }
   document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === t));
   if (t === 'deals') renderDeals();
   else if (t === 'buyers') renderBuyers();
-  else if (t === 'find') renderBuyerSearch();
-  else if (t === 'dialer') renderDialer();
-  else if (t === 'smstmpl') renderSmsTemplates();
-  else renderKPIs();
+  else renderBuyerSearch(); // find
 }
 document.querySelectorAll('.tab-btn').forEach(b => b.onclick = () => switchTab(b.dataset.tab));
 
@@ -1985,7 +2029,7 @@ async function linkBuyerToDeal(buyerId) {
 
 /* ================= KPI dashboard ================= */
 async function renderKPIs() {
-  $('content').innerHTML = '<div class="empty-state">Loading KPIs…</div>';
+  sectionContentEl().innerHTML = '<div class="empty-state">Loading KPIs…</div>';
   const offersSnap = await db.collection('dispoOffers').get();
   const offers = offersSnap.docs.map(o => o.data());
   const active = deals.filter(d => !['closed', 'dead'].includes(d.stage));
@@ -2006,7 +2050,7 @@ async function renderKPIs() {
       <div class="v" style="font-size:26px;">${val}</div>
       ${sub ? `<div style="font-size:12px;color:#8a97a8;margin-top:4px;">${sub}</div>` : ''}
     </div>`;
-  $('content').innerHTML = `
+  sectionContentEl().innerHTML = `
     <div class="num-grid" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr));">
       ${stat('Active deals', active.length, 'under contract → offers in')}
       ${stat('Total offers', offers.length, 'across all deals')}
@@ -2276,14 +2320,14 @@ function fillSms(tpl, deal, buyer) {
 }
 /* ---------------- 💬 SMS Templates editor ---------------- */
 async function renderSmsTemplates() {
-  $('content').innerHTML = '<div class="empty-state">Loading templates…</div>';
+  sectionContentEl().innerHTML = '<div class="empty-state">Loading templates…</div>';
   const t = await loadSmsTemplates();
   const field = (n, label, sub) => `
     <div class="form-field" style="margin-bottom:14px;"><label>${label}</label>
       ${sub ? `<div class="addr-sub" style="margin-bottom:6px;">${sub}</div>` : ''}
       <textarea id="st-sms${n}" style="width:100%;padding:12px;border-radius:10px;border:1px solid #22385a;background:#0b1626;color:#e9edf3;font-size:15px;min-height:110px;">${esc(t['sms' + n])}</textarea>
     </div>`;
-  $('content').innerHTML = `
+  sectionContentEl().innerHTML = `
     <div class="detail-card">
       <h2 style="font-size:18px;">💬 SMS Templates</h2>
       <div class="addr-sub">Used by the bulk SMS blast (SMS #1) and the dialer follow-ups (SMS #2–#4).</div>
@@ -3232,11 +3276,9 @@ async function ddApplySmsGate() {
 function ddCurrent() { return ddIdx < ddQueue.length ? ddQueue[ddIdx] : null; }
 
 function renderDialer() {
-  const pill = $('dialer-pill');
-  if (pill && ddBooted) pill.textContent = buyers.filter(ddCallable).length;
   if (!ddBooted) {
-    $('content').innerHTML = '<div class="empty-state">Loading…</div>';
-    setTimeout(() => { if (tab === 'dialer' && !ddStarted) renderDialer(); }, 1500);
+    sectionContentEl().innerHTML = '<div class="empty-state">Loading…</div>';
+    setTimeout(() => { if (modalSection === 'dialer' && !ddStarted) renderDialer(); }, 1500);
     return;
   }
   if (!ddStats) ddResetStats();
@@ -3250,7 +3292,7 @@ function renderDialerStart() {
   const dealOpts = ['<option value="all">🤝 All buyers</option>'].concat(
     deals.map(d => `<option value="${d.id}"${ddDealFilter === d.id ? ' selected' : ''}>📦 ${esc(d.address || 'Untitled deal')}</option>`)
   ).join('');
-  $('content').innerHTML = `<div class="dd-wrap">
+  sectionContentEl().innerHTML = `<div class="dd-wrap">
     <div class="detail-card">
       <h2>📞 Buyer Dialer</h2>
       <div class="addr-sub">${callable.length} callable buyer${callable.length === 1 ? '' : 's'} · SMS #1 → Day 1 → Day 2 → Day 4</div>
@@ -3291,7 +3333,7 @@ async function ddLoadAwaiting() {
     ddAwaitingSms = buyers.filter(b => ddCallable(b) && ids.has(b.id) && !contacted.has(b.id));
   } catch (e) { console.error('dialer awaiting SMS failed', e); ddAwaitingSms = []; }
   ddAwaitingFor = dealId;
-  if (!ddStarted && ddDealFilter === dealId && tab === 'dialer') renderDialerStart();
+  if (!ddStarted && ddDealFilter === dealId && modalSection === 'dialer') renderDialerStart();
 }
 function ddToggleCadence() { ddShowCadence = !ddShowCadence; renderDialerStart(); }
 async function ddStart() {
@@ -3300,7 +3342,7 @@ async function ddStart() {
   await ddBuildQueue();
   await ddApplySmsGate();
   ddStarted = true;
-  window.scrollTo(0, 0);
+  modalScrollTop();
   renderDialerMain();
 }
 function ddExit() { ddStarted = false; ddQueue = []; ddIdx = 0; renderDialerStart(); }
@@ -3328,7 +3370,7 @@ function renderDialerMain() {
       <p style="color:#8a97a8;">Called ${ddStats.called} · ${ddStats.interested} interested</p>
       <button class="btn-gold" onclick="ddExit()" style="margin:16px auto 0;">Back to dialer start</button>
     </div></div>`;
-    $('content').innerHTML = html;
+    sectionContentEl().innerHTML = html;
     return;
   }
   const day = b.dialDay || 1;
@@ -3358,8 +3400,8 @@ function renderDialerMain() {
       </div>
     </div>
   </div>`;
-  $('content').innerHTML = html;
-  window.scrollTo(0, 0);
+  sectionContentEl().innerHTML = html;
+  modalScrollTop();
 }
 async function ddApplyOutcome(outcomeId) {
   if (ddBusy) return;
@@ -3411,7 +3453,7 @@ function renderDialerSmsPrompt(b, dayJustCompleted) {
   const smsNum = Math.min((dayJustCompleted || 1) + 1, 4);
   const dealName = ddDealFilter === 'all' ? 'this deal'
     : '📦 ' + (((deals.find(d => d.id === ddDealFilter) || {}).address) || 'this deal');
-  $('content').innerHTML = `<div class="dd-wrap">
+  sectionContentEl().innerHTML = `<div class="dd-wrap">
     <div class="dd-top">
       <button class="btn-ghost" onclick="ddExit()">✕ Exit</button>
       <div class="dd-progress">${esc(dealName)} · ${ddQueue.length ? (ddIdx + 1) + ' of ' + ddQueue.length : 'done'}</div>
@@ -3426,7 +3468,7 @@ function renderDialerSmsPrompt(b, dayJustCompleted) {
     <button class="btn-gold" style="width:100%;min-height:56px;font-size:17px;margin-top:4px;" onclick="ddSendFollowupSms('${b.id}', ${smsNum})">📱 Send SMS #${smsNum}</button>
     <button class="btn-ghost" style="width:100%;margin-top:10px;min-height:52px;" onclick="renderDialerMain()">Next buyer →</button>
   </div>`;
-  window.scrollTo(0, 0);
+  modalScrollTop();
 }
 function ddSendFollowupSms(buyerId, smsNum) {
   openSingleSms(buyerId, {
@@ -3453,6 +3495,15 @@ async function ddResumeBuyer(id) {
 
 </script>
 
+<!-- Section modal for KPIs / Dialer / SMS Templates -->
+<div id="section-modal-overlay" class="section-modal-overlay" onclick="if(event.target===this)closeSectionModal()">
+  <div class="section-modal-card">
+    <div class="section-modal-header">
+      <button class="section-modal-close" onclick="closeSectionModal()" title="Close">✕</button>
+    </div>
+    <div class="section-modal-body" id="section-modal-body"></div>
+  </div>
+</div>
 <!-- Soft popup modals for Offers and Views -->
 <div id="popup-overlay" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.6);backdrop-filter:blur(4px);z-index:1000;align-items:center;justify-content:center;padding:20px;" onclick="if(event.target===this)closePopup()">
   <div id="popup-content" style="background:linear-gradient(180deg,#1e3a5f,#182c49);border:1px solid #2a4a73;border-radius:18px;max-width:560px;width:100%;max-height:80vh;overflow-y:auto;padding:24px;box-shadow:0 24px 64px rgba(0,0,0,0.4);"></div>
