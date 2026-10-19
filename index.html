@@ -2229,9 +2229,11 @@ function quoFromNumberId(deal) {
 function defaultSmsBody() {
   return 'Hey {firstName}, Luca here — just locked up {address} in {city}. \n\n• Price: ${ask}\n• Details: {link}';
 }
-/* Follow-up template for manual SMS #2/#3/#4 after a No Answer in the dialer. */
-function followUpSmsBody() {
-  return 'Hey {firstName}, Luca here — just tried calling about {address} in {city}.\n\n• Price: ${ask}\n• Details: {link}';
+/* Follow-up templates for manual SMS #2/#3/#4 after a No Answer in the dialer. */
+function followUpSmsBody(n) {
+  if (n === 3) return 'Did you see my deal the other day {firstName}?\nI can resend if you need..';
+  if (n === 4) return "Either I got the wrong number.. or you're just no longer buying out in {city}.\nReach out if you start buying again please,\nGod Bless";
+  return "{firstName} don't mean to bother; just dont want you missing it..\nIn case you missed my last text, I got an actual deal out in {city}.. were you able to check it out?";
 }
 function fillSms(tpl, deal, buyer) {
   // ${ask} / ${arv} carry their own $ so they don't double up with money()'s $ via fillBody
@@ -3362,7 +3364,7 @@ function renderDialerSmsPrompt(b, dayJustCompleted) {
 }
 function ddSendFollowupSms(buyerId, smsNum) {
   openSingleSms(buyerId, {
-    bodyOverride: followUpSmsBody(),
+    bodyOverride: followUpSmsBody(smsNum),
     preselectDealId: ddDealFilter !== 'all' ? ddDealFilter : null,
     followup: { dealId: ddDealFilter !== 'all' ? ddDealFilter : null, smsNum, buyerId }
   });
