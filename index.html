@@ -590,17 +590,11 @@ function renderDeals() {
       const dl = daysLeft(d.closeByDate);
       const urgent = dl != null && dl <= 7 && !['closed', 'dead', 'assigned'].includes(d.stage);
       return `<div class="deal-card" onclick="openDeal('${d.id}')">
-        <div class="deal-row">
+        <div class="deal-row" style="display:flex;justify-content:space-between;align-items:center;gap:12px;">
+          <div style="flex:1;min-width:0;">
           <div class="deal-top">
             <span class="deal-addr">${esc(d.address || 'Untitled deal')}</span>
-            <div style="display:flex;gap:6px;align-items:center;" onclick="event.stopPropagation();">
-              <button onclick="event.stopPropagation();openEmailBlast('${d.id}')" title="Email Blast" style="background:rgba(200,147,42,0.15);border:1px solid rgba(200,147,42,0.4);border-radius:10px;width:36px;height:36px;font-size:16px;cursor:pointer;">📧🚀</button>
-              <button onclick="event.stopPropagation();openSmsBlast('${d.id}')" title="SMS Blast" style="background:rgba(200,147,42,0.15);border:1px solid rgba(200,147,42,0.4);border-radius:10px;width:36px;height:36px;font-size:16px;cursor:pointer;">💬🚀</button>
-              <button onclick="event.stopPropagation();startDialer('${d.id}')" title="Dialer" style="background:rgba(200,147,42,0.15);border:1px solid rgba(200,147,42,0.4);border-radius:10px;width:36px;height:36px;font-size:18px;cursor:pointer;">📞</button>
-              <button onclick="event.stopPropagation();openViewsPopup('${d.id}')" title="Page views" style="background:rgba(200,147,42,0.15);border:1px solid rgba(200,147,42,0.4);border-radius:10px;width:36px;height:36px;font-size:18px;cursor:pointer;">👁️</button>
-              <button onclick="event.stopPropagation();openOffersPopup('${d.id}')" title="Offers" style="background:rgba(200,147,42,0.15);border:1px solid rgba(200,147,42,0.4);border-radius:10px;width:36px;height:36px;font-size:18px;cursor:pointer;">💰</button>
-              ${stageBadge(d.stage, d.id)}
-            </div>
+            ${stageBadge(d.stage, d.id)}
           </div>
           <div class="deal-sub">${esc(d.city || '')}${d.city ? ', ' : ''}${esc(d.state || 'GA')} ${esc(d.zip || '')} · ${esc(d.beds || '—')}bd/${esc(d.baths || '—')}ba · ${esc(d.sqft ? (+d.sqft).toLocaleString() + ' sqft' : '—')}</div>
           <div class="deal-numbers">
@@ -612,6 +606,14 @@ function renderDeals() {
           <div class="deal-meta">
             ${dl != null ? `<span class="${urgent ? 'urgent' : ''}">⏳ ${dl < 0 ? Math.abs(dl) + 'd past due' : dl + 'd to close-by'}</span>` : ''}
             <span>📞 <span class="mono" data-offers="${d.id}">…</span> offers</span>
+          </div>
+          </div>
+          <div style="display:flex;gap:6px;align-items:center;flex-shrink:0;" onclick="event.stopPropagation();">
+            <button onclick="event.stopPropagation();openEmailBlast('${d.id}')" title="Email Blast" style="background:rgba(200,147,42,0.15);border:1px solid rgba(200,147,42,0.4);border-radius:10px;width:36px;height:36px;font-size:16px;cursor:pointer;">📧🚀</button>
+            <button onclick="event.stopPropagation();openSmsBlast('${d.id}')" title="SMS Blast" style="background:rgba(200,147,42,0.15);border:1px solid rgba(200,147,42,0.4);border-radius:10px;width:36px;height:36px;font-size:16px;cursor:pointer;">💬🚀</button>
+            <button onclick="event.stopPropagation();startDialer('${d.id}')" title="Dialer" style="background:rgba(200,147,42,0.15);border:1px solid rgba(200,147,42,0.4);border-radius:10px;width:36px;height:36px;font-size:18px;cursor:pointer;">📞</button>
+            <button onclick="event.stopPropagation();openViewsPopup('${d.id}')" title="Page views" style="background:rgba(200,147,42,0.15);border:1px solid rgba(200,147,42,0.4);border-radius:10px;width:36px;height:36px;font-size:18px;cursor:pointer;">👁️</button>
+            <button onclick="event.stopPropagation();openOffersPopup('${d.id}')" title="Offers" style="background:rgba(200,147,42,0.15);border:1px solid rgba(200,147,42,0.4);border-radius:10px;width:36px;height:36px;font-size:18px;cursor:pointer;">💰</button>
           </div>
         </div>
       </div>`;
