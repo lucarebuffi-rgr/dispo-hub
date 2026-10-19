@@ -304,6 +304,21 @@
   .dd-cadence { background: rgba(18,37,64,.6); border: 1px solid #1e3554; border-radius: 12px; padding: 14px 16px; margin-bottom: 16px; font-size: 13px; color: #8a97a8; line-height: 1.9; }
   .dd-cadence b { color: #e8c476; }
   .dd-paused-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; background: rgba(18,37,64,.5); border: 1px solid #22385a; border-radius: 10px; padding: 10px 14px; margin-bottom: 8px; font-size: 14px; color: #aeb9c7; }
+
+  /* ===== Deal Board: 2-column card grid on desktop (2026-10-19) ===== */
+  @media (min-width: 1024px) {
+    #content:has(> .deal-card) { display: flex; flex-wrap: wrap; gap: 14px; align-items: flex-start; }
+    #content:has(> .deal-card) > div[style*="flex-end"],
+    #content:has(> .deal-card) > .stage-row,
+    #content:has(> .deal-card) > .empty-state { flex: 0 0 100%; }
+    #content:has(> .deal-card) > .deal-card { flex: 1 1 calc(50% - 7px); max-width: calc(50% - 7px); margin-bottom: 0; }
+  }
+
+  /* ===== Dialer outcome grid: clean 2-column on tiny phones (2026-10-19) ===== */
+  @media (max-width: 400px) {
+    .dd-outcome-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .dd-outcome { flex: none; min-width: 0; min-height: 52px; padding: 12px 8px; }
+  }
 </style>
 </head>
 <body>
