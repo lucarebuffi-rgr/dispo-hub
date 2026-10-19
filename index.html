@@ -2324,7 +2324,7 @@ function renderDealDialer() {
         ${b.email ? `<div style="font-size:14px;color:#aeb9c7;">✉️ ${esc(b.email)}</div>` : ''}
       </div>
       <div class="detail-card">
-        <div class="section-label" style="margin-top:0;">Log outcome</div>
+        <div class="section-label" style="margin-top:0;">Call Disposition</div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
           ${outs.map(o => `<button class="btn-ghost" data-outcome="${o}" style="${prev && prev.outcome === o ? 'border-color:#d4a843;color:#e8c476;background:rgba(212,168,67,.1);' : ''}">${o}</button>`).join('')}
         </div>
@@ -2369,7 +2369,28 @@ async function persistDialerOutcome() {
   }
 }
 async function dialerNext() {
+  const item = dialer.queue[dialer.idx];
+  const { outcome } = dialerCurrentOutcome();
   await persistDialerOutcome();
+  // After a No Answer, offer the follow-up SMS before moving on
+  if (outcome === 'No Answer' && item && item.buyer) {
+    const b = item.buyer;
+    const dealId = dialer.dealId;
+    const step = (b.smsStepByDeal && b.smsStepByDeal[dealId]) || 1;
+    const smsNum = Math.min(step + 1, 4);
+    document.getElementById('dispo-dialer').remove();
+    document.body.insertAdjacentHTML('beforeend', `
+    <div id="dispo-dialer" style="position:fixed;inset:0;z-index:2000;background:#0a1423;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:20px;">
+      <div style="text-align:center;max-width:400px;">
+        <div style="font-size:44px;">📵</div>
+        <h2 style="color:#e9edf3;margin:8px 0 4px;">No Answer logged</h2>
+        <div style="color:#8a97a8;font-size:14px;margin-bottom:20px;">${esc(b.name || '')} — send the follow-up text now, or skip to the next buyer.</div>
+        <button class="btn-gold" style="width:100%;min-height:56px;font-size:17px;" onclick="dealDialerSendSms('${b.id}', ${smsNum}, '${dealId}')">📱 Send SMS #${smsNum}</button>
+        <button class="btn-ghost" style="width:100%;margin-top:10px;min-height:52px;" onclick="dealDialerNextBuyer()">Next buyer →</button>
+      </div>
+    </div>`);
+    return;
+  }
   document.getElementById('dispo-dialer').remove();
   if (dialer.idx < dialer.queue.length - 1) {
     dialer.idx++;
@@ -2379,6 +2400,34 @@ async function dialerNext() {
     showToast(`Session done — ${n} buyer${n === 1 ? '' : 's'} logged`);
     dialer = null;
     await loadAll();
+  }
+}
+function dealDialerSendSms(buyerId, smsNum, dealId) {
+  document.getElementById('dispo-dialer').remove();
+  openSingleSms(buyerId, {
+    bodyOverride: smsT(smsNum),
+    preselectDealId: dealId,
+    followup: { dealId, smsNum, buyerId }
+  });
+  // After the SMS overlay closes, show the next-buyer screen
+  const checkClosed = setInterval(() => {
+    if (!document.getElementById('sms-blast') && dialer) {
+      clearInterval(checkClosed);
+      dealDialerNextBuyer();
+    }
+    if (!dialer) clearInterval(checkClosed);
+  }, 500);
+}
+function dealDialerNextBuyer() {
+  document.getElementById('dispo-dialer').remove();
+  if (dialer.idx < dialer.queue.length - 1) {
+    dialer.idx++;
+    renderDealDialer();
+  } else {
+    const n = Object.keys(dialer.outcomes).length;
+    showToast(`Session done — ${n} buyer${n === 1 ? '' : 's'} logged`);
+    dialer = null;
+    loadAll();
   }
 }
 function dialerNav(dir) {
