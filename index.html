@@ -138,6 +138,8 @@
   .num-box .l { font-size: 10px; text-transform: uppercase; letter-spacing: .08em; color: #8a97a8; }
   .num-box .v { font-size: 19px; font-weight: 800; color: #e8c476; font-family: 'JetBrains Mono', monospace; margin-top: 4px; }
   .num-box .v.green { color: #4caf82; }
+  .num-box .v.dbl-edit { cursor: pointer; }
+  .num-box .v.dbl-edit:hover { outline: 1px dashed rgba(200,147,42,.5); outline-offset: 2px; border-radius: 4px; }
   .num-box input { width: 100%; background: transparent; border: none; color: #e8c476; font-family: 'JetBrains Mono', monospace; font-size: 19px; font-weight: 800; outline: none; }
   .section-label { font-size: 11px; letter-spacing: .14em; text-transform: uppercase; color: #d4a843; font-weight: 700; margin: 18px 0 10px; }
   .photo-section { margin-top: 4px; }
@@ -928,17 +930,19 @@ async function openDeal(id) {
         <div style="display:flex;gap:8px;align-items:center;">
           <button onclick="openOffersPopup('${d.id}')" title="Offers" style="background:rgba(200,147,42,0.15);border:1px solid rgba(200,147,42,0.4);border-radius:12px;width:44px;height:44px;font-size:22px;cursor:pointer;">💰</button>
           <button onclick="openViewsPopup('${d.id}')" title="Page views" style="background:rgba(200,147,42,0.15);border:1px solid rgba(200,147,42,0.4);border-radius:12px;width:44px;height:44px;font-size:22px;cursor:pointer;">👁️</button>
+          <button onclick="openEmailBlast('${d.id}')" title="Email Blast" style="background:rgba(200,147,42,0.15);border:1px solid rgba(200,147,42,0.4);border-radius:12px;width:44px;height:44px;font-size:20px;cursor:pointer;">📧🚀</button>
+          <button onclick="openSmsBlast('${d.id}')" title="SMS Blast" style="background:rgba(200,147,42,0.15);border:1px solid rgba(200,147,42,0.4);border-radius:12px;width:44px;height:44px;font-size:20px;cursor:pointer;">💬🚀</button>
           ${stageBadge(d.stage)}
         </div>
       </div>
       ${dl != null && !['closed', 'dead', 'assigned'].includes(d.stage) ? `<div class="${dl <= 7 ? 'urgent' : ''}" style="font-size:14px;margin-bottom:6px;">⏳ ${dl < 0 ? Math.abs(dl) + ' days PAST the close-by date' : dl + ' days to close-by date (' + esc(fmtDate(d.closeByDate)) + ')'}</div>` : ''}
       <div class="section-label">Numbers</div>
       <div class="num-grid">
-        <div class="num-box"><div class="l">Contract</div><div class="v">${money(d.contractPrice)}</div></div>
-        <div class="num-box"><div class="l">ARV</div><div class="v">${money(d.arv)}</div></div>
-        <div class="num-box"><div class="l">Flip Rehab</div><div class="v">${money(d.rehabFlip)}</div></div>
-        <div class="num-box"><div class="l">Rent-Ready</div><div class="v">${money(d.rehabRentReady)}</div></div>
-        <div class="num-box"><div class="l">Ask</div><div class="v green">${money(d.askPrice)}</div></div>
+        <div class="num-box"><div class="l">Contract</div><div class="v dbl-edit" data-field="contractPrice" ondblclick="editDealNumber('${d.id}','contractPrice',this)" title="Double-click to edit">${money(d.contractPrice)}</div></div>
+        <div class="num-box"><div class="l">ARV</div><div class="v dbl-edit" data-field="arv" ondblclick="editDealNumber('${d.id}','arv',this)" title="Double-click to edit">${money(d.arv)}</div></div>
+        <div class="num-box"><div class="l">Flip Rehab</div><div class="v dbl-edit" data-field="rehabFlip" ondblclick="editDealNumber('${d.id}','rehabFlip',this)" title="Double-click to edit">${money(d.rehabFlip)}</div></div>
+        <div class="num-box"><div class="l">Rent-Ready</div><div class="v dbl-edit" data-field="rehabRentReady" ondblclick="editDealNumber('${d.id}','rehabRentReady',this)" title="Double-click to edit">${money(d.rehabRentReady)}</div></div>
+        <div class="num-box"><div class="l">Ask</div><div class="v green dbl-edit" data-field="askPrice" ondblclick="editDealNumber('${d.id}','askPrice',this)" title="Double-click to edit">${money(d.askPrice)}</div></div>
         <div class="num-box"><div class="l">Fee Target</div><div class="v">${money(d.assignmentFee)}</div></div>
         <div class="num-box"><div class="l">ARV − Contract</div><div class="v ${spread > 0 ? 'green' : ''}">${spread != null ? money(spread) : '—'}</div></div>
       </div>
@@ -989,8 +993,6 @@ async function openDeal(id) {
       <h2 style="font-size:18px;">🏆 Top Ranked Buyers <span style="color:#8a97a8;font-size:13px;font-weight:400;">(${topRanked.length})</span></h2>
       <div class="addr-sub">InvestorBase Smart Match picks for this deal — call these first.</div>
       ${topRanked.length ? `<button class="btn-gold" style="width:100%;min-height:52px;margin-bottom:12px;" onclick="startDialer('${id}')">📞 Start Call Session (${topRanked.length} buyers)</button>` : ''}
-      <button class="btn-ghost" style="width:100%;min-height:52px;margin-bottom:12px;" onclick="openEmailBlast('${id}')">📧 Email Buyers</button>
-      <button class="btn-ghost" style="width:100%;min-height:52px;margin-bottom:12px;" onclick="openSmsBlast('${id}')">📱 Text Buyers</button>
       ${topRanked.length ? topRanked.map(pb => {
         const b = pb._buyer;
         const nm = (b && b.name) || pb.buyerName || 'Unknown buyer';
@@ -1091,6 +1093,38 @@ async function setStage(id, stage) {
   await logActivity(id, `Stage → ${STAGE_MAP[stage].label}`);
   showToast(`Stage → ${STAGE_MAP[stage].label}`);
   await loadAll(); openDeal(id);
+}
+/* Double-click to edit deal numbers (Contract, ARV, Flip Rehab, Rent-Ready, Ask). */
+function editDealNumber(dealId, field, el) {
+  if (el.querySelector('input')) return; // already editing
+  const d = deals.find(x => x.id === dealId);
+  const cur = d ? (d[field] == null ? '' : d[field]) : '';
+  el.innerHTML = `<input type="number" inputmode="decimal" value="${esc(String(cur))}" style="width:100%;">`;
+  const input = el.querySelector('input');
+  input.focus(); input.select();
+  const commit = async (save) => {
+    if (save) await saveDealNumber(dealId, field, input.value);
+    else openDeal(dealId); // cancel → re-render
+  };
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); commit(true); }
+    else if (e.key === 'Escape') { commit(false); }
+    e.stopPropagation();
+  });
+  input.addEventListener('blur', () => commit(true));
+  input.addEventListener('click', (e) => e.stopPropagation());
+  input.addEventListener('dblclick', (e) => e.stopPropagation());
+}
+async function saveDealNumber(dealId, field, rawVal) {
+  const v = rawVal === '' ? null : +String(rawVal).replace(/[^0-9.]/g, '');
+  const val = (rawVal === '' || isNaN(v)) ? null : v;
+  try {
+    await db.collection('dispoDeals').doc(dealId).set({ [field]: val, updatedAt: new Date().toISOString() }, { merge: true });
+    const d = deals.find(x => x.id === dealId);
+    if (d) d[field] = val;
+    showToast('Saved ✓');
+  } catch (e) { console.error('saveDealNumber failed', e); showToast('Save failed'); }
+  openDeal(dealId); // re-render with updated + recalculated values
 }
 async function addDealNote(id) {
   const inp = $('note-input');
@@ -3123,7 +3157,7 @@ function openBuyer(id) {
     <div class="detail-card">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap;">
         <div>
-          ${(() => { const pn = [b.firstName, b.lastName].filter(Boolean).join(' '); return pn ? `<h2>${esc(pn)}</h2><div style="font-size:14px;color:#8a97a8;margin-top:2px;">${esc(b.name || '')}</div>` : `<h2>${esc(b.name)}</h2>`; })()}
+          ${(() => { const pn = [b.firstName, b.lastName].filter(Boolean).join(' '); return pn ? `<h2 style="margin-bottom:8px;">${esc(pn)}</h2><div style="font-size:14px;color:#8a97a8;margin-bottom:4px;">${esc(b.name || '')}</div>` : `<h2>${esc(b.name)}</h2>`; })()}
           <div class="addr-sub">${esc(b.type || '')}${b.mailingAddress ? ' · ' + esc(b.mailingAddress) : ''}</div>
         </div>
         ${b.status === 'inactive' ? '<span class="inactive-tag">Inactive</span>' : ''}
