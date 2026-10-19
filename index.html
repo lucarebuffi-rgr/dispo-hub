@@ -2260,9 +2260,10 @@ async function linkBuyerToDeal(buyerId) {
 /* ================= KPI dashboard ================= */
 async function renderKPIs() {
   sectionContentEl().innerHTML = '<div class="empty-state">Loading KPIs…</div>';
+  const withTimeout = (p, ms=10000) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), ms))]);
   let offers = [];
   try {
-    const offersSnap = await db.collection('dispoOffers').get();
+    const offersSnap = await withTimeout(db.collection('dispoOffers').get());
     offers = offersSnap.docs.map(o => o.data());
   } catch (e) {
     sectionContentEl().innerHTML = '<div class="empty-state">Failed to load offers: ' + esc(e.message) + '</div>';
@@ -2275,13 +2276,13 @@ async function renderKPIs() {
   // Calls made — dial clicks logged in dispoActivity
   let callsMade = 0;
   try {
-    const actSnap = await db.collection('dispoActivity').where('type', '==', 'dial_clicked').get();
+    const actSnap = await withTimeout(db.collection('dispoActivity').where('type', '==', 'dial_clicked').get());
     callsMade = actSnap.size;
   } catch (e) {}
   // SMS sent — blast totals + one-off sends
   let smsSent = 0;
   try {
-    const smsSnap = await db.collection('dispoSmsBlasts').get();
+    const smsSnap = await withTimeout(db.collection('dispoSmsBlasts').get());
     smsSnap.docs.forEach(doc => {
       const b = doc.data();
       if (b.type === 'blast') smsSent += (+b.sent || 0);
