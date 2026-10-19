@@ -2398,10 +2398,13 @@ async function setBuyerDealPipeline(buyerId, dealId, status) {
         await db.collection('dispoBuyers').doc(buyerId).set({ dealPipeline: b.dealPipeline }, { merge: true });
       }
     } else {
+      // Engaging with a deal = active buyer
+      upd['status'] = 'active';
       await db.collection('dispoBuyers').doc(buyerId).set(upd, { merge: true });
       const bi = buyers.findIndex(x => x.id === buyerId);
       if (bi >= 0) {
         buyers[bi].dealPipeline = Object.assign({}, buyers[bi].dealPipeline, { [dealId]: status });
+        buyers[bi].status = 'active';
       }
     }
     showToast(status ? 'Deal status set ✓' : 'Deal status cleared');
