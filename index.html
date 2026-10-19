@@ -3270,6 +3270,43 @@ async function sendSingleSms() {
 /* ---------------- Bulk SMS blast (Quo) ---------------- */
 let smsRun = null;
 function closeSmsOverlay() { const el = document.getElementById('sms-blast'); if (el) el.remove(); }
+async function openSmsBlastHistory(dealId) {
+  const d = deals.find(x => x.id === dealId);
+  showModal(`<div style="font-size:18px;font-weight:800;margin-bottom:4px;">📊 SMS Blast History</div>
+    <div style="font-size:13px;color:#8a97a8;margin-bottom:14px;">${esc(d ? d.address : '')}</div>
+    <div id="sbh-list" style="font-size:14px;color:#8a97a8;">Loading…</div>`);
+  try {
+    const snap = await db.collection('dispoSmsBlasts').where('dealId', '==', dealId).get();
+    const blasts = [];
+    snap.forEach(doc => blasts.push({ id: doc.id, ...doc.data() }));
+    blasts.sort((a, b) => (b.startedAt || '').localeCompare(a.startedAt || ''));
+    const el = document.getElementById('sbh-list');
+    if (!blasts.length) {
+      el.innerHTML = '<div style="color:#5c6b82;">No SMS blasts yet for this deal.</div>';
+      return;
+    }
+    el.innerHTML = blasts.map(b => {
+      const dt = b.startedAt ? new Date(b.startedAt).toLocaleString() : '—';
+      const statusColor = b.status === 'done' ? '#7fc98f' : b.status === 'cancelled' ? '#e07a77' : '#e8b84b';
+      const pct = b.total ? Math.round((b.sent / b.total) * 100) : 0;
+      return `<div style="background:#0b1626;border:1px solid #22385a;border-radius:10px;padding:12px;margin-bottom:10px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+          <span style="font-weight:700;color:#e9edf3;">${b.type === 'single' ? '📱 One-off' : '🚀 Blast'}</span>
+          <span style="font-size:12px;font-weight:700;color:${statusColor};text-transform:uppercase;">${b.status || '?'}</span>
+        </div>
+        <div style="font-size:12px;color:#8a97a8;margin-bottom:8px;">${dt}</div>
+        <div style="display:flex;gap:12px;font-size:13px;">
+          <span>✅ <b style="color:#7fc98f;">${b.sent || 0}</b> sent</span>
+          ${b.failed ? `<span>❌ <b style="color:#e07a77;">${b.failed}</b> failed</span>` : ''}
+          ${b.total ? `<span>📊 ${b.total} total (${pct}%)</span>` : ''}
+        </div>
+        ${b.total ? `<div style="height:6px;background:#1a2a42;border-radius:3px;margin-top:8px;overflow:hidden;"><div style="height:100%;width:${pct}%;background:${statusColor};border-radius:3px;"></div></div>` : ''}
+      </div>`;
+    }).join('');
+  } catch (e) {
+    document.getElementById('sbh-list').innerHTML = '<div style="color:#e07a77;">Failed to load: ' + esc(e.message) + '</div>';
+  }
+}
 function maybeCloseSmsOverlay() {
   if (smsRun && !smsRun.finished) {
     if (!confirm('An SMS blast is still running. Close this screen and let it finish in the background?')) return;
@@ -3300,7 +3337,10 @@ async function openSmsBlast(dealId) {
     <div style="max-width:640px;margin:0 auto;padding:18px 16px 60px;">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
         <div style="font-size:18px;font-weight:800;">📱 Text Buyers</div>
-        <button class="btn-ghost" onclick="maybeCloseSmsOverlay()">✕</button>
+        <div style="display:flex;gap:8px;">
+          <button class="btn-ghost" onclick="openSmsBlastHistory('${dealId}')" style="font-size:13px;">📊 History</button>
+          <button class="btn-ghost" onclick="maybeCloseSmsOverlay()">✕</button>
+        </div>
       </div>
       <div style="font-size:13px;color:#8a97a8;margin-bottom:14px;">${esc(d.address)} · from ${esc(dealPhoneDispo(d))}</div>
       <div class="detail-card">
