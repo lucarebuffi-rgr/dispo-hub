@@ -919,6 +919,14 @@ async function openDeal(id) {
   const retComps = allComps.filter(c => c.compType === 'retail');
   const dl = daysLeft(d.closeByDate);
   const spread = (d.arv && d.contractPrice) ? (+d.arv - +d.contractPrice) : null;
+  // Dialer lock: unlocked only if at least one pulled buyer has SMS #1 sent for this deal
+  let dialerUnlocked = false, dialerCount = 0;
+  try {
+    const smsContacted = await contactedBuyerIds(id, 'dispoSmsBlasts');
+    const pulledIds = new Set(pulledBuyers.map(r => r.buyerId).filter(Boolean));
+    dialerCount = [...pulledIds].filter(bid => smsContacted.has(bid)).length;
+    dialerUnlocked = dialerCount > 0;
+  } catch (e) { dialerUnlocked = false; dialerCount = 0; }
   $('content').innerHTML = `<div class="detail-wrap">
     <button class="back-btn" onclick="switchTab('deals')">← Back to deals</button>
     <div class="detail-card">
@@ -928,10 +936,11 @@ async function openDeal(id) {
           <div class="addr-sub">${esc(d.city || '')}${d.city ? ', ' : ''}${esc(d.state || 'GA')} ${esc(d.zip || '')}${d.county ? ' · ' + esc(d.county) + ' Co' : ''}</div>
         </div>
         <div style="display:flex;gap:8px;align-items:center;">
-          <button onclick="openOffersPopup('${d.id}')" title="Offers" style="background:rgba(200,147,42,0.15);border:1px solid rgba(200,147,42,0.4);border-radius:12px;width:44px;height:44px;font-size:22px;cursor:pointer;">💰</button>
-          <button onclick="openViewsPopup('${d.id}')" title="Page views" style="background:rgba(200,147,42,0.15);border:1px solid rgba(200,147,42,0.4);border-radius:12px;width:44px;height:44px;font-size:22px;cursor:pointer;">👁️</button>
           <button onclick="openEmailBlast('${d.id}')" title="Email Blast" style="background:rgba(200,147,42,0.15);border:1px solid rgba(200,147,42,0.4);border-radius:12px;width:44px;height:44px;font-size:20px;cursor:pointer;">📧🚀</button>
           <button onclick="openSmsBlast('${d.id}')" title="SMS Blast" style="background:rgba(200,147,42,0.15);border:1px solid rgba(200,147,42,0.4);border-radius:12px;width:44px;height:44px;font-size:20px;cursor:pointer;">💬🚀</button>
+          ${dialerUnlocked ? `<button onclick="startDialer('${d.id}')" title="Dialer — ${dialerCount} buyers ready for Call #1" style="background:rgba(200,147,42,0.15);border:1px solid rgba(200,147,42,0.4);border-radius:12px;width:44px;height:44px;font-size:22px;cursor:pointer;">📞</button>` : `<button title="Dialer locked — send SMS #1 first" disabled style="background:rgba(100,110,130,0.1);border:1px solid rgba(100,110,130,0.3);border-radius:12px;width:44px;height:44px;font-size:22px;opacity:0.4;cursor:not-allowed;">🔒</button>`}
+          <button onclick="openViewsPopup('${d.id}')" title="Page views" style="background:rgba(200,147,42,0.15);border:1px solid rgba(200,147,42,0.4);border-radius:12px;width:44px;height:44px;font-size:22px;cursor:pointer;">👁️</button>
+          <button onclick="openOffersPopup('${d.id}')" title="Offers" style="background:rgba(200,147,42,0.15);border:1px solid rgba(200,147,42,0.4);border-radius:12px;width:44px;height:44px;font-size:22px;cursor:pointer;">💰</button>
           ${stageBadge(d.stage)}
         </div>
       </div>
@@ -992,7 +1001,6 @@ async function openDeal(id) {
     <div class="detail-card">
       <h2 style="font-size:18px;">🏆 Top Ranked Buyers <span style="color:#8a97a8;font-size:13px;font-weight:400;">(${topRanked.length})</span></h2>
       <div class="addr-sub">InvestorBase Smart Match picks for this deal — call these first.</div>
-      ${topRanked.length ? `<button class="btn-gold" style="width:100%;min-height:52px;margin-bottom:12px;" onclick="startDialer('${id}')">📞 Start Call Session (${topRanked.length} buyers)</button>` : ''}
       ${topRanked.length ? topRanked.map(pb => {
         const b = pb._buyer;
         const nm = (b && b.name) || pb.buyerName || 'Unknown buyer';
