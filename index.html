@@ -1130,13 +1130,20 @@ async function openDeal(id) {
         const bid = b ? b.id : null;
         const smsSent = bid && typeof smsContacted !== 'undefined' && smsContacted.has(bid);
         const iconBtn = (oc, ti, em, dis) => `<button onclick="${oc}" title="${ti}"${dis ? ' disabled' : ''} style="background:rgba(200,147,42,0.15);border:1px solid rgba(200,147,42,0.4);border-radius:10px;width:38px;height:38px;font-size:17px;${dis ? 'opacity:0.35;cursor:not-allowed;' : 'cursor:pointer;'}">${em}</button>`;
+        const pipe = (b && b.dealPipeline && b.dealPipeline[id]) || '';
+        const pipeColors = { 'interested': '#7fb3ff', 'viewing': '#e8b84b', 'walkthrough': '#c9a0ff', 'offer': '#7fc98f', 'assigned': '#e8b84b' };
+        const pipeLabels = { 'interested': 'Interested', 'viewing': 'Viewing', 'walkthrough': 'Walkthrough Scheduled', 'offer': 'Offer Submitted', 'assigned': 'Assigned' };
         return `
         <div class="match-row"${b ? ` onclick="openBuyer('${b.id}')" style="cursor:pointer;"` : ''}>
           <div class="match-info">
-            <div class="n">🏆 ${esc(nm)}</div>
+            <div class="n">🏆 ${esc(nm)}${pipe ? ` <span style="font-size:11px;font-weight:700;color:${pipeColors[pipe] || '#8a97a8'};background:rgba(255,255,255,.06);border-radius:12px;padding:2px 8px;margin-left:4px;">${pipeLabels[pipe] || pipe}</span>` : ''}</div>
             ${person ? `<div class="w" style="color:#e8c476;">👤 ${esc(person)}</div>` : ''}
             <div class="w">${addr ? '📍 ' + esc(addr) : ''}${addr && price ? ' · ' : ''}${price ? '💰 ' + esc(price) : ''}${!addr && !price ? '—' : ''}</div>
             ${email ? `<div class="w">✉️ <a href="mailto:${esc(email)}" onclick="event.stopPropagation()" style="color:#7fb3ff;">${esc(email)}</a></div>` : ''}
+            ${bid ? `<div onclick="event.stopPropagation()" style="margin-top:6px;"><select onchange="setBuyerDealPipeline('${bid}', '${id}', this.value)" style="font-size:12px;padding:6px 8px;border-radius:8px;border:1px solid #22385a;background:#0b1626;color:#e9edf3;min-height:36px;">
+              <option value="">Set deal status…</option>
+              ${Object.entries(pipeLabels).map(([v, l]) => `<option value="${v}"${pipe === v ? ' selected' : ''}>${l}</option>`).join('')}
+            </select></div>` : ''}
           </div>
           <div style="display:flex;gap:6px;align-items:center;flex-shrink:0;" onclick="event.stopPropagation()">
             ${bid ? iconBtn(`openSingleEmail('${bid}')`, 'Email this buyer', '📧🚀', !email) : ''}
@@ -2378,6 +2385,30 @@ function dialerCurrentOutcome() {
   const sel = document.querySelector('#dispo-dialer [data-outcome][data-selected]');
   const note = ($('dialer-note') || {}).value?.trim() || '';
   return { outcome: sel ? sel.dataset.outcome : '', note };
+}
+async function setBuyerDealPipeline(buyerId, dealId, status) {
+  try {
+    const upd = {};
+    upd['dealPipeline.' + dealId] = status || null;
+    // Clean up: if empty string, delete the key
+    if (!status) {
+      const b = buyers.find(x => x.id === buyerId);
+      if (b && b.dealPipeline) {
+        delete b.dealPipeline[dealId];
+        await db.collection('dispoBuyers').doc(buyerId).set({ dealPipeline: b.dealPipeline }, { merge: true });
+      }
+    } else {
+      await db.collection('dispoBuyers').doc(buyerId).set(upd, { merge: true });
+      const bi = buyers.findIndex(x => x.id === buyerId);
+      if (bi >= 0) {
+        buyers[bi].dealPipeline = Object.assign({}, buyers[bi].dealPipeline, { [dealId]: status });
+      }
+    }
+    showToast(status ? 'Deal status set ✓' : 'Deal status cleared');
+    openDeal(dealId);
+  } catch (e) {
+    showToast('Failed: ' + e.message);
+  }
 }
 async function persistDialerOutcome() {
   const item = dialer.queue[dialer.idx];
