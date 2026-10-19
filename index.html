@@ -2584,6 +2584,9 @@ async function ensureQuoContact(b, deal) {
 async function sendSmsViaQuo(phone, message, fromNumberId) {
   const digits = digitsOnly(phone || '');
   if (!digits) throw new Error('No phone number on this buyer');
+  // Validate US phone: must be 10 digits, or 11 starting with 1
+  const valid = digits.length === 10 || (digits.length === 11 && digits[0] === '1');
+  if (!valid) throw new Error('Invalid phone number (' + digits.length + ' digits) — skipped');
   if (!message || !message.trim()) throw new Error('Message is empty');
   const body = { action: 'sendSms', to: digits, content: message.trim() };
   if (fromNumberId) body.fromNumberId = fromNumberId;
@@ -3163,7 +3166,7 @@ function smsPaceCountdown(ms) {
       if (!smsRun || smsRun.cancel) { clearInterval(iv); resolve(); return; }
       const left = Math.max(0, end - Date.now());
       const el = document.getElementById('sb-countdown');
-      if (el) el.textContent = 'Next text in ' + Math.floor(left / 60) + ':' + String(Math.floor(left % 60)).padStart(2, '0');
+      if (el) el.textContent = 'Next text in ' + Math.floor(left / 60000) + ':' + String(Math.floor((left % 60000) / 1000)).padStart(2, '0');
       if (left <= 0) { clearInterval(iv); resolve(); }
     }, 1000);
   });
