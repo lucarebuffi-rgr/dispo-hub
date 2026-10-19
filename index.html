@@ -3307,6 +3307,10 @@ async function openSmsBlastHistory(dealId) {
     document.getElementById('sbh-list').innerHTML = '<div style="color:#e07a77;">Failed to load: ' + esc(e.message) + '</div>';
   }
 }
+function sbUseTemplate(n) {
+  const ta = document.getElementById('sb-body');
+  if (ta) { ta.value = smsT(n); showToast('SMS #' + n + ' template loaded'); }
+}
 function maybeCloseSmsOverlay() {
   if (smsRun && !smsRun.finished) {
     if (!confirm('An SMS blast is still running. Close this screen and let it finish in the background?')) return;
@@ -3353,6 +3357,12 @@ async function openSmsBlast(dealId) {
       </div>
       <div class="detail-card">
         <div class="section-label" style="margin-top:0;">Message</div>
+        <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap;">
+          <button class="btn-ghost" onclick="sbUseTemplate(1)" style="font-size:13px;padding:8px 12px;">SMS #1</button>
+          <button class="btn-ghost" onclick="sbUseTemplate(2)" style="font-size:13px;padding:8px 12px;">SMS #2</button>
+          <button class="btn-ghost" onclick="sbUseTemplate(3)" style="font-size:13px;padding:8px 12px;">SMS #3</button>
+          <button class="btn-ghost" onclick="sbUseTemplate(4)" style="font-size:13px;padding:8px 12px;">SMS #4</button>
+        </div>
         <textarea id="sb-body" style="width:100%;padding:12px;border-radius:10px;border:1px solid #22385a;background:#0b1626;color:#e9edf3;font-size:15px;min-height:150px;">${esc(smsT(1))}</textarea>
         <div style="font-size:11px;color:#5c6b82;margin-top:6px;">Placeholders: {firstName} {address} {city} {state} {ask} {arv} {beds} {baths} {sqft} {link} {phone}</div>
         <div class="section-label">Seconds between texts</div>
