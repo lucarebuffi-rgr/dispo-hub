@@ -1199,6 +1199,7 @@ async function openDeal(id) {
         const pipeColors = { 'interested': '#7fb3ff', 'viewing': '#e8b84b', 'walkthrough': '#c9a0ff', 'offer': '#7fc98f', 'assigned': '#e8b84b' };
         const pipeLabels = { 'interested': 'Interested', 'viewing': 'Viewing', 'walkthrough': 'Walkthrough Scheduled', 'offer': 'Offer Submitted', 'assigned': 'Assigned' };
         const bid = b ? b.id : null;
+        const smsSentAP = bid && typeof smsContacted !== 'undefined' && smsContacted.has(bid);
         return `
         <div class="match-row"${b ? ` onclick="openBuyer('${b.id}')" style="cursor:pointer;"` : ''}>
           <div class="match-info">
@@ -1213,7 +1214,7 @@ async function openDeal(id) {
             ${(() => {
               const stages = ['interested', 'viewing', 'walkthrough', 'offer', 'assigned'];
               const curIdx = stages.indexOf(pipe);
-              const smsStep = (b && b.smsStepByDeal && b.smsStepByDeal[id]) || (smsSent ? 1 : 0);
+              const smsStep = (b && b.smsStepByDeal && b.smsStepByDeal[id]) || (typeof smsSentAP !== 'undefined' && smsSentAP ? 1 : 0);
               const cadenceSteps = [
                 { n: 'SMS 1', done: smsStep >= 1 },
                 { n: 'Day 1', done: smsStep >= 2 },
