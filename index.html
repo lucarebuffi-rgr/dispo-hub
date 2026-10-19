@@ -2229,6 +2229,10 @@ function quoFromNumberId(deal) {
 function defaultSmsBody() {
   return 'Hey {firstName}, Luca here — just locked up {address} in {city}. \n\n• Price: ${ask}\n• Details: {link}';
 }
+/* Follow-up template for manual SMS #2/#3/#4 after a No Answer in the dialer. */
+function followUpSmsBody() {
+  return 'Hey {firstName}, Luca here — just tried calling about {address} in {city}.\n\n• Price: ${ask}\n• Details: {link}';
+}
 function fillSms(tpl, deal, buyer) {
   // ${ask} / ${arv} carry their own $ so they don't double up with money()'s $ via fillBody
   const raw = v => (v === '' || v == null || isNaN(+v)) ? '—' : (+v).toLocaleString('en-US', { maximumFractionDigits: 0 });
@@ -2642,10 +2646,15 @@ function shortDate(iso) {
 }
 let singleSmsBuyerId = null;
 let singleSmsLastFilled = '';
-async function openSingleSms(buyerId) {
+let singleSmsBodyOverride = null;
+let singleSmsFollowup = null; // {dealId, smsNum, buyerId} when launched from the dialer after a No Answer
+async function openSingleSms(buyerId, o) {
   const b = buyers.find(x => x.id === buyerId);
   if (!b || !b.phone) { showToast('No phone on this buyer'); return; }
+  o = o || {};
   singleSmsBuyerId = buyerId;
+  singleSmsBodyOverride = o.bodyOverride || null;
+  singleSmsFollowup = o.followup || null;
   const opts = dealOptionsHTML(await relevantDealsForBuyer(b));
   smsRun = null;
   closeSmsOverlay();
@@ -2673,6 +2682,10 @@ async function openSingleSms(buyerId) {
       <div style="font-size:11px;color:#5c6b82;margin-top:12px;">Contact is created in Quo automatically so the reply shows the buyer's name.</div>
     </div>
   </div>`);
+  if (o.preselectDealId) {
+    const sel = document.getElementById('ss-deal');
+    if (sel && [...sel.options].some(op => op.value === o.preselectDealId)) sel.value = o.preselectDealId;
+  }
   ssDealChanged();
   window.scrollTo(0, 0);
 }
@@ -2683,7 +2696,7 @@ function ssDealChanged() {
   const ta = document.getElementById('ss-body');
   // Refill the template for the new deal unless Luca already edited the message.
   if (d && ta && (!ta.value || ta.value === singleSmsLastFilled)) {
-    singleSmsLastFilled = fillSms(defaultSmsBody(), d, b);
+    singleSmsLastFilled = fillSms(singleSmsBodyOverride || defaultSmsBody(), d, b);
     ta.value = singleSmsLastFilled;
   }
   const sub = document.getElementById('ss-sub');
@@ -2696,6 +2709,10 @@ async function checkSingleSmsDup() {
   if (!dealId || !singleSmsBuyerId) { w.innerHTML = ''; return; }
   const contacted = await contactedBuyerIds(dealId, 'dispoSmsBlasts');
   const at = contacted.get(singleSmsBuyerId);
+  if (singleSmsFollowup && singleSmsFollowup.smsNum) {
+    w.innerHTML = '<div style="font-size:13px;color:#7fc98f;background:#12271a;border:1px solid #2c5a36;border-radius:8px;padding:8px 10px;">✓ Initial text sent' + (at ? ' on ' + esc(shortDate(at)) : '') + ' — this sends follow-up SMS #' + singleSmsFollowup.smsNum + '.</div>';
+    return;
+  }
   w.innerHTML = at
     ? '<div style="font-size:13px;color:#e8b84b;background:#2a2113;border:1px solid #6b5416;border-radius:8px;padding:8px 10px;">⚠️ Already texted' + (at ? ' on ' + esc(shortDate(at)) : '') + ' for this deal — sending again will text them twice.</div>'
     : '';
@@ -2724,6 +2741,24 @@ async function sendSingleSms() {
     await sendSmsViaQuo(b.phone, msgFilled, quoFromNumberId(d));
     const now = new Date().toISOString();
     await db.collection('dispoSmsBlasts').add({ type: 'single', dealId, dealAddress: d.address, to: digitsOnly(b.phone), buyerId: b.id, buyerIds: [b.id], startedAt: now, finishedAt: now, status: 'done', sent: 1 }).catch(() => {});
+    if (singleSmsFollowup && singleSmsFollowup.buyerId === b.id) {
+      const fu = singleSmsFollowup;
+      singleSmsFollowup = null;
+      singleSmsBodyOverride = null;
+      if (fu.dealId) {
+        try {
+          const upd = { updatedAt: new Date().toISOString() };
+          upd['smsStepByDeal.' + fu.dealId] = fu.smsNum;
+          await db.collection('dispoBuyers').doc(b.id).set(upd, { merge: true });
+          const lb = buyers.find(x => x.id === b.id);
+          if (lb) lb.smsStepByDeal = Object.assign({}, lb.smsStepByDeal, { [fu.dealId]: fu.smsNum });
+        } catch (e) { console.warn('sms step save failed', e); }
+      }
+      showToast('SMS #' + fu.smsNum + ' sent');
+      closeSmsOverlay();
+      if (typeof renderDialerMain === 'function') renderDialerMain();
+      return;
+    }
     showToast('Text sent to ' + formatPhone(b.phone));
     closeSmsOverlay();
   } catch (e) {
@@ -3027,10 +3062,13 @@ function openBuyer(id) {
 /* ================= 📞 DispoHub Dialer =================
    Buyer call dialer — same single-column format as the CRM dialers
    (buyer card on top, Notes + disposition buttons below).
-   4-day cycle: D1 Double Dial+VM+SMS → D2 Double Dial+VM+SMS →
-   D3 rest (skip) → D4 Double Dial+VM+SMS (send deal) → restart.
+   Outreach cadence: Day 1 = SMS #1 bulk blast (prerequisite, sent via
+   📱 Text Buyers — buyers can't enter the dialer for a deal until texted).
+   Dialer call steps: D1 Double Dial+VM → manual SMS #2 → D2 Double Dial →
+   manual SMS #3 → D4 Double Dial+VM → manual SMS #4 → restart.
    Calls log to `dispoBuyerCalls`; per-buyer cycle state lives on the
-   buyer doc (dialDay, dialNextDate, dialStatus, lastDialDispo, lastDialAt).
+   buyer doc (dialDay, dialNextDate, dialStatus, lastDialDispo, lastDialAt,
+   smsStepByDeal).
    dialStatus: 'paused' (Not Active — resumable), 'bad_number' / 'dnc' /
    'interested' (permanently out of the queue). */
 const DD_OUTCOMES = [
@@ -3040,11 +3078,13 @@ const DD_OUTCOMES = [
   { id: 'bad_number', label: 'Bad Number' },
   { id: 'dnc', label: 'DNC' }
 ];
+/* New outreach cadence: SMS #1 (bulk blast via 📱 Text Buyers) is a prerequisite
+   handled outside the dialer — the dialer only runs the call steps.
+   Manual SMS #2/#3/#4 are fired from the "Send SMS" prompt after each No Answer. */
 const DD_CADENCE = [
-  { day: 1, action: 'Double Dial + VM + SMS' },
-  { day: 2, action: 'Double Dial + VM + SMS' },
-  { day: 3, action: 'Rest day — skip' },
-  { day: 4, action: 'Double Dial + VM + SMS (send deal)' }
+  { day: 1, action: 'Double Dial + VM → SMS #2' },
+  { day: 2, action: 'Double Dial → SMS #3' },
+  { day: 4, action: 'Double Dial + VM → SMS #4' }
 ];
 let ddBooted = false;
 let ddQueue = [];
@@ -3054,6 +3094,10 @@ let ddStarted = false;
 let ddShowCadence = false;
 let ddBusy = false;
 let ddStats = null;
+/* SMS #1 gate: buyers pulled for the selected deal but not yet texted for it.
+   Computed per deal; the dialer queue excludes them until the bulk blast goes out. */
+let ddAwaitingSms = [];
+let ddAwaitingFor = null;
 function ddResetStats() { ddStats = { called: 0, no_answer: 0, interested: 0, not_active: 0, bad_number: 0, dnc: 0 }; }
 function ddBuyerName(b) {
   const fl = [b.firstName, b.lastName].filter(Boolean).join(' ').trim();
@@ -3077,7 +3121,7 @@ function ddDayAction(day) {
   const c = DD_CADENCE.find(c => c.day === day) || DD_CADENCE[0];
   return 'Day ' + c.day + ' — ' + c.action;
 }
-/* Day 2 → skip Day 3 → Day 4 lands 2 days out; otherwise next day */
+/* Day 1 → Day 2 (tomorrow), Day 2 → Day 4 (2 days out), Day 4 → Day 1 (restart) */
 function ddNextDay(day) { return day === 1 ? 2 : day === 2 ? 4 : 1; }
 function ddNextDue(day) {
   const d = new Date();
@@ -3104,6 +3148,19 @@ async function ddBuildQueue() {
   ddQueue = pool;
   ddIdx = 0;
 }
+/* SMS #1 gate (per deal): a buyer can't enter the call dialer for a deal until
+   SMS #1 (the bulk blast) has been sent to them for that deal.
+   Fail-open: if the SMS check can't run, don't block calling. */
+async function ddApplySmsGate() {
+  ddAwaitingSms = [];
+  if (ddDealFilter === 'all') return;
+  try {
+    const contacted = await contactedBuyerIds(ddDealFilter, 'dispoSmsBlasts');
+    ddAwaitingSms = ddQueue.filter(b => !contacted.has(b.id));
+    ddQueue = ddQueue.filter(b => contacted.has(b.id));
+    ddAwaitingFor = ddDealFilter;
+  } catch (e) { console.error('dialer SMS #1 gate failed', e); }
+}
 function ddCurrent() { return ddIdx < ddQueue.length ? ddQueue[ddIdx] : null; }
 
 function renderDialer() {
@@ -3121,38 +3178,59 @@ function renderDialer() {
 function renderDialerStart() {
   const callable = buyers.filter(ddCallable);
   const paused = buyers.filter(b => b.dialStatus === 'paused' && b.status !== 'inactive');
+  if (ddDealFilter !== 'all' && ddAwaitingFor !== ddDealFilter && !ddStarted) ddLoadAwaiting();
   const dealOpts = ['<option value="all">🤝 All buyers</option>'].concat(
     deals.map(d => `<option value="${d.id}"${ddDealFilter === d.id ? ' selected' : ''}>📦 ${esc(d.address || 'Untitled deal')}</option>`)
   ).join('');
   $('content').innerHTML = `<div class="dd-wrap">
     <div class="detail-card">
       <h2>📞 Buyer Dialer</h2>
-      <div class="addr-sub">${callable.length} callable buyer${callable.length === 1 ? '' : 's'} · 4-day cycle</div>
+      <div class="addr-sub">${callable.length} callable buyer${callable.length === 1 ? '' : 's'} · SMS #1 → Day 1 → Day 2 → Day 4</div>
       <div class="section-label">Call list</div>
       <div class="dd-filter"><select id="dd-deal-filter" onchange="ddChangeFilter(this)">${dealOpts}</select></div>
       <button class="btn-gold" style="width:100%;min-height:52px;font-size:17px;" onclick="ddStart()">▶ Start calling</button>
       <button class="btn-ghost" style="width:100%;margin-top:10px;" onclick="ddToggleCadence()">${ddShowCadence ? '▴ Hide' : '▾ Show'} call cadence</button>
       ${ddShowCadence ? `<div class="dd-cadence" style="margin-top:12px;">
-        <b>Day 1</b> — Double Dial + VM + SMS<br>
-        <b>Day 2</b> — Double Dial + VM + SMS<br>
-        <b>Day 3</b> — Rest day (skip)<br>
-        <b>Day 4</b> — Double Dial + VM + SMS (send deal)<br>
-        <span style="color:#5c6b82;">No Answer advances to the next call day. Interested removes the buyer from the queue; Not Active pauses them; Bad Number / DNC remove them permanently.</span>
+        <b>Day 1 — SMS #1</b> — bulk blast via 📱 Text Buyers (prerequisite)<br>
+        <b>Day 1</b> — Double Dial + VM → manual 📱 SMS #2<br>
+        <b>Day 2</b> — Double Dial → manual 📱 SMS #3<br>
+        <b>Day 4</b> — Double Dial + VM → manual 📱 SMS #4<br>
+        <span style="color:#5c6b82;">Buyers can't enter the dialer for a deal until SMS #1 (the bulk blast) has been sent to them for that deal — they wait under ⏳ Awaiting SMS #1 below. After a No Answer, the 📱 Send SMS button fires the manual follow-up text. Interested removes the buyer from the queue; Not Active pauses them; Bad Number / DNC remove them permanently.</span>
       </div>` : ''}
       ${ddStats && ddStats.called ? `<div class="dd-stats" style="margin-top:12px;">Session: 📞 ${ddStats.called} called · ✅ ${ddStats.interested} interested · 📵 ${ddStats.no_answer} no answer · ⏸️ ${ddStats.not_active} not active · ❌ ${ddStats.bad_number} bad # · 🚫 ${ddStats.dnc} DNC</div>` : ''}
     </div>
+    ${ddDealFilter !== 'all' && ddAwaitingSms.length ? `<div class="detail-card">
+      <h2 style="font-size:18px;">⏳ Awaiting SMS #1 <span style="color:#8a97a8;font-size:13px;font-weight:400;">(${ddAwaitingSms.length})</span></h2>
+      <div class="addr-sub">These buyers haven't received the SMS #1 bulk blast for this deal yet — run 📱 Text Buyers from the deal page first, then they'll unlock for calling.</div>
+      ${ddAwaitingSms.slice(0, 25).map(b => `<div class="dd-paused-row"><span>${esc(ddBuyerName(b))}</span><span style="color:#8a97a8;font-size:12px;">${esc(formatPhone(b.phone))}</span></div>`).join('')}
+      ${ddAwaitingSms.length > 25 ? `<div class="addr-sub">+${ddAwaitingSms.length - 25} more…</div>` : ''}
+    </div>` : ''}
     ${paused.length ? `<div class="detail-card">
       <h2 style="font-size:18px;">⏸️ Paused (Not Active) <span style="color:#8a97a8;font-size:13px;font-weight:400;">(${paused.length})</span></h2>
       ${paused.map(b => `<div class="dd-paused-row"><span>${esc(ddBuyerName(b))}</span><button class="btn-ghost" onclick="ddResumeBuyer('${b.id}')">Resume</button></div>`).join('')}
     </div>` : ''}
   </div>`;
 }
-function ddChangeFilter(sel) { ddDealFilter = sel.value; renderDialerStart(); }
+function ddChangeFilter(sel) { ddDealFilter = sel.value; ddAwaitingSms = []; ddAwaitingFor = null; renderDialerStart(); }
+/* Compute the ⏳ Awaiting SMS #1 list for the dialer start screen (per selected deal). */
+async function ddLoadAwaiting() {
+  const dealId = ddDealFilter;
+  if (dealId === 'all' || ddStarted) return;
+  try {
+    const snap = await db.collection('dispoBuyerSearchResults').where('dealId', '==', dealId).get();
+    const ids = new Set(snap.docs.map(d => (d.data() || {}).buyerId).filter(Boolean));
+    const contacted = await contactedBuyerIds(dealId, 'dispoSmsBlasts');
+    ddAwaitingSms = buyers.filter(b => ddCallable(b) && ids.has(b.id) && !contacted.has(b.id));
+  } catch (e) { console.error('dialer awaiting SMS failed', e); ddAwaitingSms = []; }
+  ddAwaitingFor = dealId;
+  if (!ddStarted && ddDealFilter === dealId && tab === 'dialer') renderDialerStart();
+}
 function ddToggleCadence() { ddShowCadence = !ddShowCadence; renderDialerStart(); }
 async function ddStart() {
   ddResetStats();
   showToast('Building call queue…');
   await ddBuildQueue();
+  await ddApplySmsGate();
   ddStarted = true;
   window.scrollTo(0, 0);
   renderDialerMain();
@@ -3256,7 +3334,38 @@ async function ddApplyOutcome(outcomeId) {
   if (ddIdx >= ddQueue.length) ddIdx = Math.max(0, ddQueue.length - 1);
   ddBusy = false;
   showToast(`${label} logged`);
+  if (outcomeId === 'no_answer') { renderDialerSmsPrompt(b, day); return; }
   renderDialerMain();
+}
+/* After a No Answer: prompt the manual follow-up text.
+   SMS #2 follows Day-1 calls, #3 follows Day-2, #4 follows Day-4. */
+function renderDialerSmsPrompt(b, dayJustCompleted) {
+  const smsNum = Math.min((dayJustCompleted || 1) + 1, 4);
+  const dealName = ddDealFilter === 'all' ? 'this deal'
+    : '📦 ' + (((deals.find(d => d.id === ddDealFilter) || {}).address) || 'this deal');
+  $('content').innerHTML = `<div class="dd-wrap">
+    <div class="dd-top">
+      <button class="btn-ghost" onclick="ddExit()">✕ Exit</button>
+      <div class="dd-progress">${esc(dealName)} · ${ddQueue.length ? (ddIdx + 1) + ' of ' + ddQueue.length : 'done'}</div>
+      <div style="width:70px;"></div>
+    </div>
+    <div class="dd-card" style="text-align:center;">
+      <div style="font-size:44px;">📵</div>
+      <h2 style="color:#e9edf3;margin:8px 0 4px;">No Answer logged</h2>
+      <div style="color:#8a97a8;font-size:14px;margin-bottom:6px;">${esc(ddBuyerName(b))} · next: ${esc(ddDayAction(ddNextDay(dayJustCompleted)))}</div>
+      <div class="addr-sub">Fire the manual follow-up text now, or skip to the next buyer.</div>
+    </div>
+    <button class="btn-gold" style="width:100%;min-height:56px;font-size:17px;margin-top:4px;" onclick="ddSendFollowupSms('${b.id}', ${smsNum})">📱 Send SMS #${smsNum}</button>
+    <button class="btn-ghost" style="width:100%;margin-top:10px;min-height:52px;" onclick="renderDialerMain()">Next buyer →</button>
+  </div>`;
+  window.scrollTo(0, 0);
+}
+function ddSendFollowupSms(buyerId, smsNum) {
+  openSingleSms(buyerId, {
+    bodyOverride: followUpSmsBody(),
+    preselectDealId: ddDealFilter !== 'all' ? ddDealFilter : null,
+    followup: { dealId: ddDealFilter !== 'all' ? ddDealFilter : null, smsNum, buyerId }
+  });
 }
 async function ddResumeBuyer(id) {
   try {
