@@ -2131,6 +2131,24 @@ async function renderKPIs() {
   const closedDeals = deals.filter(d => d.stage === 'closed');
   const assignedDeals = deals.filter(d => d.stage === 'assigned');
   const totalFees = closedDeals.reduce((s, d) => s + (+d.assignmentFee || 0), 0);
+  // Calls made — dial clicks logged in dispoActivity
+  let callsMade = 0;
+  try {
+    const actSnap = await db.collection('dispoActivity').where('type', '==', 'dial_clicked').get();
+    callsMade = actSnap.size;
+  } catch (e) {}
+  // SMS sent — blast totals + one-off sends
+  let smsSent = 0;
+  try {
+    const smsSnap = await db.collection('dispoSmsBlasts').get();
+    smsSnap.docs.forEach(doc => {
+      const b = doc.data();
+      if (b.type === 'blast') smsSent += (+b.sent || 0);
+      else smsSent += 1; // one-off
+    });
+  } catch (e) {}
+  // Walkthroughs scheduled — deals with a walkthrough date set
+  const walkthroughs = deals.filter(d => d.transWalkthrough && String(d.transWalkthrough).trim()).length;
   // Avg days under contract → assigned/closed
   let daySum = 0, dayN = 0;
   deals.forEach(d => {
@@ -2143,6 +2161,9 @@ async function renderKPIs() {
   const cards = [
     [active.length, 'Active deals', 'under contract → offers in', '#5b8fd4'],
     [offers.length, 'Total offers', 'across all deals', '#c084fc'],
+    [callsMade, 'Calls made', 'tap-to-dial logged', '#5b8fd4'],
+    [smsSent, 'SMS sent', 'blasts + one-off', '#c084fc'],
+    [walkthroughs, 'Walkthroughs', 'scheduled', '#d4a843'],
     [assignedDeals.length, 'Assigned', '', '#d4a843'],
     [closedDeals.length, 'Closed', '', '#4caf82'],
     [money(totalFees), 'Fees collected', 'closed deals', '#e0954a'],
