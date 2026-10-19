@@ -2319,7 +2319,8 @@ function renderDealDialer() {
         <div style="font-size:13px;color:#8a97a8;margin-top:4px;">${esc(item.why.join(' · '))}</div>
         ${b.buyBox ? `<div style="font-size:13px;color:#aeb9c7;font-style:italic;margin-top:8px;">🎯 ${esc(b.buyBox)}</div>` : ''}
         ${b.phone
-          ? `<a href="tel:${digitsOnly(b.phone)}" onclick="logDispoDialClick('${b.id}',dialer.dealId)" class="btn-gold" style="display:block;text-decoration:none;margin:18px 0 6px;min-height:60px;display:flex;align-items:center;justify-content:center;font-size:19px;">📞 ${esc(formatPhone(b.phone))}</a>`
+          ? `<a href="tel:${digitsOnly(b.phone)}" onclick="logDispoDialClick('${b.id}',dialer.dealId)" class="btn-gold" style="display:block;text-decoration:none;margin:18px 0 6px;min-height:60px;display:flex;align-items:center;justify-content:center;font-size:19px;">📞 ${esc(formatPhone(b.phone))}</a>
+             <button class="btn-ghost" style="display:block;width:100%;min-height:52px;font-size:16px;margin-bottom:6px;" onclick="openSingleSms('${b.id}', {preselectDealId: dialer.dealId})">💬 Text</button>`
           : '<div style="color:#e07a77;font-weight:700;margin:18px 0;">⚠️ No phone — needs skip trace</div>'}
         ${b.email ? `<div style="font-size:14px;color:#aeb9c7;">✉️ ${esc(b.email)}</div>` : ''}
       </div>
@@ -3039,6 +3040,9 @@ async function openSingleSms(buyerId, o) {
         <select id="ss-deal" onchange="ssDealChanged()" style="width:100%;padding:12px;border-radius:10px;border:1px solid #22385a;background:#0b1626;color:#e9edf3;font-size:15px;">${opts}</select>
         <div id="ss-dupwarn" style="margin-top:8px;"></div>
         <div class="section-label">Message</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;">
+          ${[1,2,3,4].map(n => `<button class="btn-ghost" style="min-height:44px;padding:8px 14px;font-size:14px;" onclick="ssUseTemplate(${n})">SMS #${n}</button>`).join('')}
+        </div>
         <textarea id="ss-body" style="width:100%;padding:12px;border-radius:10px;border:1px solid #22385a;background:#0b1626;color:#e9edf3;font-size:15px;min-height:150px;"></textarea>
         <div style="font-size:11px;color:#5c6b82;margin-top:6px;">Placeholders: {firstName} {address} {city} {state} {ask} {arv} {beds} {baths} {sqft} {link} {phone}</div>
       </div>
@@ -3056,6 +3060,15 @@ async function openSingleSms(buyerId, o) {
   }
   ssDealChanged();
   window.scrollTo(0, 0);
+}
+function ssUseTemplate(n) {
+  const b = buyers.find(x => x.id === singleSmsBuyerId); if (!b) return;
+  const dealId = ($('ss-deal') || {}).value || '';
+  const d = deals.find(x => x.id === dealId);
+  if (!d) { showToast('Pick a deal first'); return; }
+  singleSmsLastFilled = fillSms(smsT(n), d, b);
+  const ta = document.getElementById('ss-body');
+  if (ta) ta.value = singleSmsLastFilled;
 }
 function ssDealChanged() {
   const b = buyers.find(x => x.id === singleSmsBuyerId); if (!b) return;
