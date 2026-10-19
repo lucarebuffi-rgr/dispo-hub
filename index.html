@@ -15,6 +15,7 @@
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <style>
@@ -79,6 +80,19 @@
     .section-modal-overlay { padding: 0; align-items: flex-end; }
     .section-modal-card { max-width: 100%; max-height: 94vh; border-radius: 18px 18px 0 0; }
   }
+
+  /* ===== KPI dashboard (GA Probates design) ===== */
+  .kpi-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 22px; }
+  .kpi-card { background: linear-gradient(180deg, #142a47, #0f2140); border: 1px solid #1e3554; border-radius: 12px; padding: 16px 14px; text-align: center; }
+  .kpi-card .kpi-num { display: block; font-size: 30px; font-weight: 800; font-family: 'JetBrains Mono', monospace; font-variant-numeric: tabular-nums; color: #e9edf3; margin-bottom: 4px; }
+  .kpi-card .kpi-label { font-size: 11px; color: #8a97a8; text-transform: uppercase; letter-spacing: .08em; font-weight: 700; }
+  .kpi-card .kpi-card-sub { font-size: 12px; color: #8a97a8; margin-top: 6px; }
+  .kpi-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; }
+  .kpi-panel { background: rgba(18,37,64,.55); border: 1px solid #1d3350; border-radius: 14px; padding: 18px; }
+  .kpi-panel h3 { margin: 0 0 4px; font-size: 14px; color: #e8c476; font-weight: 700; }
+  .kpi-panel .kpi-sub { font-size: 11px; color: #8a97a8; margin-bottom: 12px; }
+  .kpi-panel .chart-wrap { position: relative; height: 280px; }
+  @media (max-width: 760px) { .kpi-grid { grid-template-columns: 1fr; } }
 
   /* ===== Stage filter row ===== */
   .stage-row { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
@@ -2125,42 +2139,48 @@ async function renderKPIs() {
       if (days >= 0 && days < 365) { daySum += days; dayN++; }
     }
   });
-  const stat = (label, val, sub) => `
-    <div class="num-box" style="padding:16px;">
-      <div class="l">${label}</div>
-      <div class="v" style="font-size:26px;">${val}</div>
-      ${sub ? `<div style="font-size:12px;color:#8a97a8;margin-top:4px;">${sub}</div>` : ''}
-    </div>`;
+  if (typeof Chart !== 'undefined') Chart.defaults.font.family = "'Inter', system-ui, sans-serif";
+  const cards = [
+    [active.length, 'Active deals', 'under contract → offers in', '#5b8fd4'],
+    [offers.length, 'Total offers', 'across all deals', '#c084fc'],
+    [assignedDeals.length, 'Assigned', '', '#d4a843'],
+    [closedDeals.length, 'Closed', '', '#4caf82'],
+    [money(totalFees), 'Fees collected', 'closed deals', '#e0954a'],
+    [dayN ? Math.round(daySum / dayN) : '—', 'Avg days to assign', dayN ? `over ${dayN} deals` : '', '#e9edf3'],
+  ];
   sectionContentEl().innerHTML = `
-    <div class="num-grid" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr));">
-      ${stat('Active deals', active.length, 'under contract → offers in')}
-      ${stat('Total offers', offers.length, 'across all deals')}
-      ${stat('Assigned', assignedDeals.length, '')}
-      ${stat('Closed', closedDeals.length, '')}
-      ${stat('Fees collected', money(totalFees), 'closed deals')}
-      ${stat('Avg days to assign', dayN ? Math.round(daySum / dayN) : '—', dayN ? `over ${dayN} deals` : '')}
-    </div>
-    <div class="section-label">Deals by stage</div>
-    ${DEAL_STAGES.map(s => {
-      const c = deals.filter(d => d.stage === s.id).length;
-      const pct = deals.length ? Math.round(c / deals.length * 100) : 0;
-      return `<div style="margin-bottom:10px;">
-        <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:4px;">
-          <span style="color:${s.color};font-weight:700;">${s.label}</span><span class="mono">${c}</span>
-        </div>
-        <div style="height:8px;background:#16294a;border-radius:4px;overflow:hidden;">
-          <div style="height:100%;width:${pct}%;background:${s.color};border-radius:4px;"></div>
-        </div>
-      </div>`;
-    }).join('')}
-    <div class="section-label">Recent offers</div>
-    ${offers.sort((a, b) => tsStr(b.createdAt).localeCompare(tsStr(a.createdAt))).slice(0, 10).map(o => {
-      const d = deals.find(x => x.id === o.dealId);
-      return `<div class="match-row"><div class="match-info">
-        <div class="n">${money(o.amount)} <span style="font-weight:400;color:#8a97a8;">— ${esc(o.buyerName || '')}</span></div>
-        <div class="w">${esc(d ? d.address : '')} · ${esc(fmtDate((o.createdAt || '').slice(0, 10)))}</div>
-      </div></div>`;
-    }).join('') || '<div class="timeline-empty">No offers yet.</div>'}`;
+    <div style="font-size:18px;font-weight:800;margin:6px 0 16px;">📊 KPIs</div>
+    <div class="kpi-cards">` + cards.map(c =>
+      `<div class="kpi-card"><span class="kpi-num" style="color:${c[3]};">${c[0]}</span><span class="kpi-label">${c[1]}</span>${c[2] ? `<div class="kpi-card-sub">${c[2]}</div>` : ''}</div>`).join('') + `</div>
+    <div class="kpi-grid">
+      <div class="kpi-panel">
+        <h3>📊 Deals by stage</h3>
+        <div class="kpi-sub">${deals.length} total deals</div>
+        ${DEAL_STAGES.map(s => {
+          const c = deals.filter(d => d.stage === s.id).length;
+          const pct = deals.length ? Math.round(c / deals.length * 100) : 0;
+          return `<div style="margin-bottom:10px;">
+            <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:4px;">
+              <span style="color:${s.color};font-weight:700;">${s.label}</span><span class="mono">${c}</span>
+            </div>
+            <div style="height:8px;background:#16294a;border-radius:4px;overflow:hidden;">
+              <div style="height:100%;width:${pct}%;background:${s.color};border-radius:4px;"></div>
+            </div>
+          </div>`;
+        }).join('')}
+      </div>
+      <div class="kpi-panel">
+        <h3>💰 Recent offers</h3>
+        <div class="kpi-sub">latest submissions</div>
+        ${offers.sort((a, b) => tsStr(b.createdAt).localeCompare(tsStr(a.createdAt))).slice(0, 10).map(o => {
+          const d = deals.find(x => x.id === o.dealId);
+          return `<div class="match-row"><div class="match-info">
+            <div class="n">${money(o.amount)} <span style="font-weight:400;color:#8a97a8;">— ${esc(o.buyerName || '')}</span></div>
+            <div class="w">${esc(d ? d.address : '')} · ${esc(fmtDate((o.createdAt || '').slice(0, 10)))}</div>
+          </div></div>`;
+        }).join('') || '<div class="timeline-empty">No offers yet.</div>'}
+      </div>
+    </div>`;
 }
 
 /* ================= Dispo dialer ================= */
