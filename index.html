@@ -607,27 +607,32 @@ function rankedBuyers(deal) {
 /* ================= Deals view ================= */
 function stageBadge(stage, dealId) {
   const s = STAGE_MAP[stage] || STAGE_MAP.under_contract;
-  const clickable = dealId ? ` onclick="toggleStageMenu('${dealId}', event)" style="color:${s.color};border-color:${s.color};background:${s.color}18;cursor:pointer;" title="Change stage"` : ` style="color:${s.color};border-color:${s.color};background:${s.color}18;"`;
-  return `<span class="stage-badge"${clickable}>${s.label}${dealId ? ' <span style="font-size:10px;opacity:0.7;">▼</span>' : ''}</span>${dealId ? `<div id="stage-menu-${dealId}" class="stage-menu" style="display:none;position:absolute;z-index:100;background:#0b1626;border:1px solid #22385a;border-radius:10px;padding:6px;min-width:160px;box-shadow:0 8px 24px rgba(0,0,0,0.5);">${DEAL_STAGES.map(st => `<div onclick="setStage('${dealId}','${st.id}')" style="padding:10px 12px;border-radius:8px;cursor:pointer;font-size:14px;color:${st.color};${st.id === stage ? 'background:rgba(255,255,255,0.06);font-weight:700;' : ''}" onmouseover="this.style.background='rgba(255,255,255,0.08)'" onmouseout="this.style.background='${st.id === stage ? 'rgba(255,255,255,0.06)' : 'transparent'}'">${st.label}${st.id === stage ? ' ✓' : ''}</div>`).join('')}</div>` : ''}`;
+  const clickable = dealId ? ` onclick="toggleStageMenu('${dealId}', '${stage}', event)" style="color:${s.color};border-color:${s.color};background:${s.color}18;cursor:pointer;" title="Change stage"` : ` style="color:${s.color};border-color:${s.color};background:${s.color}18;"`;
+  return `<span class="stage-badge"${clickable}>${s.label}${dealId ? ' <span style="font-size:10px;opacity:0.7;">▼</span>' : ''}</span>`;
 }
-function toggleStageMenu(dealId, e) {
+function toggleStageMenu(dealId, curStage, e) {
   e.stopPropagation();
-  const menu = document.getElementById('stage-menu-' + dealId);
-  if (!menu) return;
-  const wasOpen = menu.style.display !== 'none';
-  document.querySelectorAll('.stage-menu').forEach(m => m.style.display = 'none');
-  if (!wasOpen) {
-    const badge = e.target.closest('.stage-badge');
-    const rect = badge.getBoundingClientRect();
-    menu.style.position = 'fixed';
-    menu.style.top = (rect.bottom + 6) + 'px';
-    menu.style.right = (window.innerWidth - rect.right) + 'px';
-    menu.style.display = 'block';
-  }
+  closeStageMenu();
+  const badge = e.target.closest('.stage-badge');
+  if (!badge || badge.dataset.open === '1') { if (badge) badge.dataset.open = ''; return; }
+  badge.dataset.open = '1';
+  const rect = badge.getBoundingClientRect();
+  const menu = document.createElement('div');
+  menu.id = 'stage-menu-live';
+  menu.style.cssText = 'position:fixed;z-index:5000;background:#0b1626;border:1px solid #22385a;border-radius:10px;padding:6px;min-width:170px;box-shadow:0 8px 24px rgba(0,0,0,0.5);';
+  menu.style.top = (rect.bottom + 6) + 'px';
+  menu.style.right = Math.max(8, window.innerWidth - rect.right) + 'px';
+  menu.innerHTML = DEAL_STAGES.map(st => `<div onclick="event.stopPropagation();closeStageMenu();setStage('${dealId}','${st.id}')" style="padding:12px;border-radius:8px;cursor:pointer;font-size:14px;color:${st.color};${st.id === curStage ? 'background:rgba(255,255,255,0.06);font-weight:700;' : ''}">${st.label}${st.id === curStage ? ' ✓' : ''}</div>`).join('');
+  menu.onclick = e => e.stopPropagation();
+  document.body.appendChild(menu);
+  // Close on next tap anywhere
+  setTimeout(() => document.addEventListener('click', closeStageMenu, { once: true }), 0);
 }
-document.addEventListener('click', () => {
-  document.querySelectorAll('.stage-menu').forEach(m => m.style.display = 'none');
-});
+function closeStageMenu() {
+  const m = document.getElementById('stage-menu-live');
+  if (m) m.remove();
+  document.querySelectorAll('.stage-badge[data-open]').forEach(b => b.dataset.open = '');
+}
 function renderDeals() {
   const list = stageFilter === 'all' ? deals : deals.filter(d => d.stage === stageFilter);
   $('deals-pill').textContent = deals.length;
