@@ -3284,6 +3284,8 @@ function maybeCloseSmsOverlay() {
   if (smsRun && !smsRun.finished) {
     if (!confirm('An SMS blast is still running. Close this screen and let it finish in the background?')) return;
     showToast('SMS blast continues in the background');
+    closeSmsOverlay();
+    return;
   }
   smsRun = null;
   closeSmsOverlay();
