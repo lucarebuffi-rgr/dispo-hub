@@ -244,8 +244,9 @@
       <h1>DispoHub</h1>
     </div>
     <div class="header-actions">
-      <button class="btn-ghost" id="import-buyers-btn" title="Import buyers from Google Sheet">📥 Import Buyers</button>
-      <button class="btn-gold" id="add-deal-btn">+ Add Deal</button>
+      <button class="btn-ghost icon-btn" onclick="switchTab('dialer')" title="Dialer">📞</button>
+      <button class="btn-ghost icon-btn" onclick="switchTab('kpis')" title="KPIs">📊</button>
+      <button class="btn-ghost icon-btn" onclick="switchTab('smstmpl')" title="SMS Templates">💬</button>
     </div>
   </div>
   <div class="header-inner">
@@ -517,7 +518,8 @@ function stageBadge(stage) {
 function renderDeals() {
   const list = stageFilter === 'all' ? deals : deals.filter(d => d.stage === stageFilter);
   $('deals-pill').textContent = deals.length;
-  let html = `<div class="stage-row">
+  let html = `<div style="display:flex;justify-content:flex-end;margin-bottom:10px;"><button class="btn-gold" onclick="showDealForm()">+ Add Deal</button></div>
+  <div class="stage-row">
     <button class="stage-btn ${stageFilter === 'all' ? 'active' : ''}" data-stage="all">All <span class="count">${deals.length}</span></button>
     ${DEAL_STAGES.map(s => {
       const c = deals.filter(d => d.stage === s.id).length;
@@ -671,8 +673,6 @@ function switchTab(t) {
   else renderKPIs();
 }
 document.querySelectorAll('.tab-btn').forEach(b => b.onclick = () => switchTab(b.dataset.tab));
-$('add-deal-btn').onclick = () => showDealForm();
-$('import-buyers-btn').onclick = () => importBuyers();
 
 // Mobile: fade header on scroll down, return on scroll up
 (function initMobileHeaderFade() {
