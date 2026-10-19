@@ -2574,19 +2574,22 @@ function buyerSmsName(b, deal) {
 }
 async function ensureQuoContact(b, deal) {
   // Best-effort: create (or dedupe) the Quo contact so replies show the buyer's name. Non-fatal.
-  const digits = digitsOnly(b.phone || '');
+  let digits = digitsOnly(b.phone || '');
   if (!digits) return;
+  if (digits.length === 10) digits = '1' + digits;
   const nm = buyerSmsName(b, deal);
   try {
     await quoPost({ action: 'createContact', firstName: nm.firstName, lastName: nm.lastName, phone: digits, company: nm.company });
   } catch (e) { console.warn('quo contact failed for ' + digits + ':', e.message); }
 }
 async function sendSmsViaQuo(phone, message, fromNumberId) {
-  const digits = digitsOnly(phone || '');
+  let digits = digitsOnly(phone || '');
   if (!digits) throw new Error('No phone number on this buyer');
   // Validate US phone: must be 10 digits, or 11 starting with 1
   const valid = digits.length === 10 || (digits.length === 11 && digits[0] === '1');
   if (!valid) throw new Error('Invalid phone number (' + digits.length + ' digits) — skipped');
+  // Prepend US country code for 10-digit numbers (proxy expects 11 digits)
+  if (digits.length === 10) digits = '1' + digits;
   if (!message || !message.trim()) throw new Error('Message is empty');
   const body = { action: 'sendSms', to: digits, content: message.trim() };
   if (fromNumberId) body.fromNumberId = fromNumberId;
