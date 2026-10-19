@@ -1024,6 +1024,9 @@ async function openDeal(id) {
         const addr = (b && b.boughtPropertyAddress) || pb.boughtPropertyAddress || pb.purchaseAddress || '';
         const price = (b && b.boughtPropertyPrice) || pb.boughtPropertyPrice || (pb.soldPrice ? String(pb.soldPrice) : '');
         const email = (b && b.email) || '';
+        const bid = b ? b.id : null;
+        const smsSent = bid && typeof smsContacted !== 'undefined' && smsContacted.has(bid);
+        const iconBtn = (oc, ti, em, dis) => `<button onclick="${oc}" title="${ti}"${dis ? ' disabled' : ''} style="background:rgba(200,147,42,0.15);border:1px solid rgba(200,147,42,0.4);border-radius:10px;width:38px;height:38px;font-size:17px;${dis ? 'opacity:0.35;cursor:not-allowed;' : 'cursor:pointer;'}">${em}</button>`;
         return `
         <div class="match-row"${b ? ` onclick="openBuyer('${b.id}')" style="cursor:pointer;"` : ''}>
           <div class="match-info">
@@ -1032,7 +1035,11 @@ async function openDeal(id) {
             <div class="w">${addr ? '📍 ' + esc(addr) : ''}${addr && price ? ' · ' : ''}${price ? '💰 ' + esc(price) : ''}${!addr && !price ? '—' : ''}</div>
             ${email ? `<div class="w">✉️ <a href="mailto:${esc(email)}" onclick="event.stopPropagation()" style="color:#7fb3ff;">${esc(email)}</a></div>` : ''}
           </div>
-          ${b && b.phone ? `<a class="call-link match-call" href="tel:${digitsOnly(b.phone)}" onclick="event.stopPropagation()">📞</a>` : `<span style="font-size:12px;color:#5c6b82;">${b ? 'no phone' : ''}</span>`}
+          <div style="display:flex;gap:6px;align-items:center;flex-shrink:0;" onclick="event.stopPropagation()">
+            ${bid ? iconBtn(`openSingleEmail('${bid}')`, 'Email this buyer', '📧🚀', !email) : ''}
+            ${bid ? iconBtn(`openSingleSms('${bid}')`, 'Text this buyer', '💬🚀', !(b && b.phone)) : ''}
+            ${bid ? iconBtn(`startDialer('${id}','${bid}')`, smsSent ? 'Call this buyer' : 'Dialer locked — send SMS #1 first', smsSent ? '📞' : '🔒', !smsSent || !(b && b.phone)) : ''}
+          </div>
         </div>`;
       }).join('') : '<div class="timeline-empty">No Smart Match buyers on this pull yet.</div>'}
     </div>
@@ -2142,7 +2149,7 @@ async function renderKPIs() {
 
 /* ================= Dispo dialer ================= */
 let dialer = null; // {dealId, queue:[{buyer,score,why}], idx, outcomes:{}}
-async function startDialer(dealId) {
+async function startDialer(dealId, onlyBuyerId) {
   const d = deals.find(x => x.id === dealId);
   if (!d) return;
   // Call session runs ONLY on this deal's InvestorBase-pulled buyers (no local auto-matching)
@@ -2162,7 +2169,8 @@ async function startDialer(dealId) {
         return { buyer: b, score: '', why };
       }).filter(Boolean);
   } catch (e) { queue = []; }
-  if (!queue.length) { showToast('No Smart Match buyers on this deal yet'); return; }
+  if (onlyBuyerId) queue = queue.filter(q => q.buyer && q.buyer.id === onlyBuyerId);
+  if (!queue.length) { showToast(onlyBuyerId ? 'Buyer not available for calling' : 'No Smart Match buyers on this deal yet'); return; }
   dialer = { dealId, queue, idx: 0, outcomes: {} };
   renderDealDialer();
 }
