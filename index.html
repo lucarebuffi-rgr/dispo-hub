@@ -873,6 +873,38 @@ document.querySelectorAll('.tab-btn').forEach(b => b.onclick = () => switchTab(b
   }, { passive: true });
 })();
 
+/* TEMP one-time backfill (remove after the 2026-10-20 run): reconstruct the
+   Oct 19 SMS blast logs whose writes were blocked by the then-missing
+   dispoSmsBlasts rule. Recipients = every pulled buyer with a phone on each
+   deal (Luca's instruction). Idempotent: skips deals already backfilled. */
+async function runSmsBackfill() {
+  const jobs = [
+    { dealId: '1xqIqbCXuWlS3wAyKu5P', addrPart: '63 S Villa', when: '2026-10-19T17:00:00.000Z' },
+    { dealId: 'blhvkllOYU15B4ZMAo1v', addrPart: '1804 South', when: '2026-10-19T17:05:00.000Z' },
+  ];
+  const lines = [];
+  for (const j of jobs) {
+    try {
+      const d = deals.find(x => x.id === j.dealId);
+      if (!d || !(d.address || '').includes(j.addrPart)) { lines.push('SKIPPED ' + j.addrPart + ': deal not found or address mismatch'); continue; }
+      const existing = await db.collection('dispoSmsBlasts').where('dealId', '==', j.dealId).get();
+      if (existing.docs.some(x => x.data().backfilled)) { lines.push('ALREADY DONE: ' + d.address); continue; }
+      const pulled = await dealPulledBuyers(j.dealId);
+      const ids = [...new Set(pulled.map(r => r.buyerId).filter(Boolean))];
+      const withPhone = ids.filter(bid => { const b = buyers.find(x => x.id === bid); return b && b.phone && digitsOnly(b.phone).length >= 10 && b.status !== 'inactive'; });
+      await db.collection('dispoSmsBlasts').add({
+        type: 'blast', dealId: d.id, dealAddress: d.address, startedAt: j.when, finishedAt: j.when,
+        total: withPhone.length, sent: withPhone.length, failed: 0, status: 'done', intervalSec: 10,
+        template: smsT(1), buyerIds: withPhone, backfilled: true,
+        note: 'Backfilled 2026-10-20: the original Oct 19 blast log writes were blocked by a missing Firestore rule. Recipients = all pulled buyers with a phone, per Luca.'
+      });
+      lines.push('BACKFILLED: ' + d.address + ' - ' + withPhone.length + ' buyers marked texted');
+    } catch (e) { lines.push('ERROR ' + j.addrPart + ': ' + (e.message || e)); }
+  }
+  $('content').innerHTML = '<div class="detail-wrap"><div class="detail-card"><h2>SMS backfill</h2>' +
+    lines.map(l => '<div style="font-size:15px;margin:8px 0;">' + esc(l) + '</div>').join('') + '</div></div>';
+}
+
 (async function boot() {
   // Public landing page mode
   const pubDeal = new URLSearchParams(location.search).get('deal');
@@ -880,6 +912,7 @@ document.querySelectorAll('.tab-btn').forEach(b => b.onclick = () => switchTab(b
   $('content').innerHTML = '<div class="empty-state">Loading…</div>';
   try { await loadAll(); } catch (e) { console.error(e); }
   loadSmsTemplates().catch(() => {}); // warm the SMS template cache (non-blocking)
+  if (new URLSearchParams(location.search).get('backfill') === '1') { await runSmsBackfill(); return; }
   switchTab('find');
 })();
 
