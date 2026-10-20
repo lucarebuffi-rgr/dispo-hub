@@ -14,16 +14,13 @@
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   html { -webkit-text-size-adjust: 100%; }
   body {
     background: #0a1423; color: #e9edf3; font-family: 'Inter', -apple-system, sans-serif;
-    min-height: 100vh; overflow-x: hidden;
+    min-height: 100vh; min-height: 100dvh; overflow-x: hidden;
   }
   .mono { font-family: 'JetBrains Mono', monospace; }
 
@@ -236,6 +233,7 @@
     .tab-btn { padding: 12px 14px; font-size: 14px; flex: 0 0 auto; }
     .form-grid { grid-template-columns: 1fr; }
     .form-field input, .form-field select, .form-field textarea { font-size: 16px; padding: 13px 12px; }
+    .kpi-panel { overflow-x: auto; }
     .btn-gold, .btn-ghost { min-height: 48px; }
     .deal-numbers { gap: 10px; }
     .call-link { min-height: 48px; display: inline-flex; align-items: center; font-size: 17px; }
@@ -1983,8 +1981,9 @@ async function openBuyerSearch(id) {
   window.scrollTo(0, 0);
   if (hasGeo) initBuyerMap(s, results);
 }
-function initBuyerMap(s, results) {
+async function initBuyerMap(s, results) {
   try {
+    await loadLibOnce('leaflet', 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js', () => typeof L !== 'undefined');
     if (window._buyerMap) { window._buyerMap.remove(); window._buyerMap = null; }
     const map = L.map('buyer-map').setView([s.lat, s.lng], 13);
     window._buyerMap = map;
@@ -2036,7 +2035,9 @@ async function initDealBuyerMap(deal, pulledBuyers) {
   const mapEl = document.getElementById('deal-buyer-map');
   const statusEl = document.getElementById('deal-map-status');
   const countEl = document.getElementById('deal-map-count');
-  if (!mapEl || typeof L === 'undefined') return;
+  if (!mapEl) return;
+  try { await loadLibOnce('leaflet', 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js', () => typeof L !== 'undefined'); } catch (e) {}
+  if (typeof L === 'undefined') return;
   const setStatus = txt => { if (statusEl) statusEl.textContent = txt || ''; };
   try {
     if (window._dealBuyerMap) { window._dealBuyerMap.remove(); window._dealBuyerMap = null; }
@@ -2258,37 +2259,38 @@ async function linkBuyerToDeal(buyerId) {
 }
 
 /* ================= KPI dashboard ================= */
+/* Lazy-load heavy libraries (map, screenshot) only when a feature needs them */
+const _lazyLibs = {};
+function loadLibOnce(key, url, isReady) {
+  if (isReady()) return Promise.resolve();
+  if (_lazyLibs[key]) return _lazyLibs[key];
+  _lazyLibs[key] = new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = url; s.async = true;
+    s.onload = () => resolve();
+    s.onerror = () => { delete _lazyLibs[key]; reject(new Error('Failed to load ' + key)); };
+    document.head.appendChild(s);
+  });
+  return _lazyLibs[key];
+}
+
+/* Firestore get() with a hard timeout so a stalled query can never hang a view */
+function withTimeout(promise, ms) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => setTimeout(() => reject(new Error('Query timed out')), ms || 8000))
+  ]);
+}
+
 async function renderKPIs() {
   sectionContentEl().innerHTML = '<div class="empty-state">Loading KPIs…</div>';
-  // Show deal stats immediately (no Firestore dependency)
+  // Deal stats are local — render the full dashboard immediately, then patch
+  // in the Firestore-backed numbers as they arrive (each with a timeout,
+  // so a stalled query can never hang the whole view again).
   const active = deals.filter(d => !['closed', 'dead'].includes(d.stage));
   const closedDeals = deals.filter(d => d.stage === 'closed');
   const assignedDeals = deals.filter(d => d.stage === 'assigned');
   const totalFees = closedDeals.reduce((s, d) => s + (+d.assignmentFee || 0), 0);
-  let offers = [];
-  // Load Firestore data in background
-  try {
-    const offersSnap = await db.collection('dispoOffers').get();
-    offers = offersSnap.docs.map(o => o.data());
-  } catch (e) {
-    console.error('offers load failed', e);
-  }
-  // Calls made — dial clicks logged in dispoActivity
-  let callsMade = 0;
-  try {
-    const actSnap = await withTimeout(db.collection('dispoActivity').where('type', '==', 'dial_clicked').get());
-    callsMade = actSnap.size;
-  } catch (e) {}
-  // SMS sent — blast totals + one-off sends
-  let smsSent = 0;
-  try {
-    const smsSnap = await withTimeout(db.collection('dispoSmsBlasts').get());
-    smsSnap.docs.forEach(doc => {
-      const b = doc.data();
-      if (b.type === 'blast') smsSent += (+b.sent || 0);
-      else smsSent += 1; // one-off
-    });
-  } catch (e) {}
   // Walkthroughs scheduled — deals with a walkthrough date set
   const walkthroughs = deals.filter(d => d.transWalkthrough && String(d.transWalkthrough).trim()).length;
   // Avg days under contract → assigned/closed
@@ -2301,20 +2303,20 @@ async function renderKPIs() {
   });
   if (typeof Chart !== 'undefined') Chart.defaults.font.family = "'Inter', system-ui, sans-serif";
   const cards = [
-    [active.length, 'Active deals', 'under contract → offers in', '#5b8fd4'],
-    [offers.length, 'Total offers', 'across all deals', '#c084fc'],
-    [callsMade, 'Calls made', 'tap-to-dial logged', '#5b8fd4'],
-    [smsSent, 'SMS sent', 'blasts + one-off', '#c084fc'],
-    [walkthroughs, 'Walkthroughs', 'scheduled', '#d4a843'],
-    [assignedDeals.length, 'Assigned', '', '#d4a843'],
-    [closedDeals.length, 'Closed', '', '#4caf82'],
-    [money(totalFees), 'Fees collected', 'closed deals', '#e0954a'],
-    [dayN ? Math.round(daySum / dayN) : '—', 'Avg days to assign', dayN ? `over ${dayN} deals` : '', '#e9edf3'],
+    [active.length, 'Active deals', 'under contract → offers in', '#5b8fd4', ''],
+    ['…', 'Total offers', 'across all deals', '#c084fc', ' id="kpi-num-offers"'],
+    ['…', 'Calls made', 'tap-to-dial logged', '#5b8fd4', ' id="kpi-num-calls"'],
+    ['…', 'SMS sent', 'blasts + one-off', '#c084fc', ' id="kpi-num-sms"'],
+    [walkthroughs, 'Walkthroughs', 'scheduled', '#d4a843', ''],
+    [assignedDeals.length, 'Assigned', '', '#d4a843', ''],
+    [closedDeals.length, 'Closed', '', '#4caf82', ''],
+    [money(totalFees), 'Fees collected', 'closed deals', '#e0954a', ''],
+    [dayN ? Math.round(daySum / dayN) : '—', 'Avg days to assign', dayN ? `over ${dayN} deals` : '', '#e9edf3', ''],
   ];
   sectionContentEl().innerHTML = `
     <div style="font-size:18px;font-weight:800;margin:6px 0 16px;">📊 KPIs</div>
     <div class="kpi-cards">` + cards.map(c =>
-      `<div class="kpi-card"><span class="kpi-num" style="color:${c[3]};">${c[0]}</span><span class="kpi-label">${c[1]}</span>${c[2] ? `<div class="kpi-card-sub">${c[2]}</div>` : ''}</div>`).join('') + `</div>
+      `<div class="kpi-card"><span class="kpi-num" style="color:${c[3]};"${c[4]}>${c[0]}</span><span class="kpi-label">${c[1]}</span>${c[2] ? `<div class="kpi-card-sub">${c[2]}</div>` : ''}</div>`).join('') + `</div>
     <div class="kpi-grid">
       <div class="kpi-panel">
         <h3>📊 Deals by stage</h3>
@@ -2335,15 +2337,42 @@ async function renderKPIs() {
       <div class="kpi-panel">
         <h3>💰 Recent offers</h3>
         <div class="kpi-sub">latest submissions</div>
-        ${offers.sort((a, b) => tsStr(b.createdAt).localeCompare(tsStr(a.createdAt))).slice(0, 10).map(o => {
-          const d = deals.find(x => x.id === o.dealId);
-          return `<div class="match-row"><div class="match-info">
-            <div class="n">${money(o.amount)} <span style="font-weight:400;color:#8a97a8;">— ${esc(o.buyerName || '')}</span></div>
-            <div class="w">${esc(d ? d.address : '')} · ${esc(fmtDate((o.createdAt || '').slice(0, 10)))}</div>
-          </div></div>`;
-        }).join('') || '<div class="timeline-empty">No offers yet.</div>'}
+        <div id="kpi-recent-offers"><div class="timeline-empty">Loading offers…</div></div>
       </div>
     </div>`;
+  // — Firestore-backed numbers: patched in as they land, timeouts on every query —
+  const setNum = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
+  try {
+    const offersSnap = await withTimeout(db.collection('dispoOffers').get(), 8000);
+    const offers = offersSnap.docs.map(o => o.data());
+    setNum('kpi-num-offers', offers.length);
+    const ro = document.getElementById('kpi-recent-offers');
+    if (ro) ro.innerHTML = offers.sort((a, b) => tsStr(b.createdAt).localeCompare(tsStr(a.createdAt))).slice(0, 10).map(o => {
+      const d = deals.find(x => x.id === o.dealId);
+      return `<div class="match-row"><div class="match-info">
+        <div class="n">${money(o.amount)} <span style="font-weight:400;color:#8a97a8;">— ${esc(o.buyerName || '')}</span></div>
+        <div class="w">${esc(d ? d.address : '')} · ${esc(fmtDate((o.createdAt || '').slice(0, 10)))}</div>
+      </div></div>`;
+    }).join('') || '<div class="timeline-empty">No offers yet.</div>';
+  } catch (e) {
+    setNum('kpi-num-offers', '—');
+    const ro = document.getElementById('kpi-recent-offers');
+    if (ro) ro.innerHTML = '<div class="timeline-empty">Could not load offers.</div>';
+  }
+  try {
+    const actSnap = await withTimeout(db.collection('dispoActivity').where('type', '==', 'dial_clicked').get(), 8000);
+    setNum('kpi-num-calls', actSnap.size);
+  } catch (e) { setNum('kpi-num-calls', '—'); }
+  try {
+    const smsSnap = await withTimeout(db.collection('dispoSmsBlasts').get(), 8000);
+    let smsSent = 0;
+    smsSnap.docs.forEach(doc => {
+      const b = doc.data();
+      if (b.type === 'blast') smsSent += (+b.sent || 0);
+      else smsSent += 1; // one-off
+    });
+    setNum('kpi-num-sms', smsSent);
+  } catch (e) { setNum('kpi-num-sms', '—'); }
 }
 
 /* ================= Dispo dialer ================= */
@@ -2851,6 +2880,7 @@ async function dealPreviewPNG(deal) {
   const imgs = el.querySelectorAll('img');
   await Promise.all(Array.from(imgs).map(img => img.complete ? Promise.resolve() : new Promise(res => { img.onload = res; img.onerror = res; setTimeout(res, 5000); })));
   await new Promise(r => setTimeout(r, 300));
+  await loadLibOnce('html2canvas', 'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js', () => typeof html2canvas !== 'undefined');
   const canvas = await html2canvas(el, { scale: 2, useCORS: true, backgroundColor: '#faf8f3' });
   return canvas.toDataURL('image/png').split(',')[1];
 }
