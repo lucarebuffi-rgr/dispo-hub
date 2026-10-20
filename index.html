@@ -78,7 +78,7 @@
   .icon-btn { display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; border-radius: 12px; font-size: 20px; padding: 0 !important; flex-shrink: 0; }
   @media (max-width: 640px) {
     .section-modal-overlay { padding: 0; align-items: flex-end; }
-    .section-modal-card { max-width: 100%; max-height: 94vh; border-radius: 18px 18px 0 0; }
+    .section-modal-card { max-width: 100%; max-height: 94vh; max-height: 94dvh; border-radius: 18px 18px 0 0; }
   }
 
   /* ===== KPI dashboard (GA Probates design) ===== */
@@ -234,12 +234,12 @@
     .form-grid { grid-template-columns: 1fr; }
     .form-field input, .form-field select, .form-field textarea { font-size: 16px; padding: 13px 12px; }
     .kpi-panel { overflow-x: auto; }
-  .deal-actions { flex-wrap: wrap; row-gap: 8px; }
+  .deal-actions { flex-wrap: wrap; gap: 10px; row-gap: 10px; margin-top: 6px; }
   .deal-actions .blast-btn { font-size: 15px !important; letter-spacing: -3px; padding: 0; }
     .btn-gold, .btn-ghost { min-height: 48px; }
     .deal-numbers { gap: 10px; }
     .call-link { min-height: 48px; display: inline-flex; align-items: center; font-size: 17px; }
-    .num-grid { grid-template-columns: 1fr 1fr; }
+    .num-grid { grid-template-columns: 1fr 1fr; gap: 12px; }
     /* Deal cards: clean stacked layout on mobile — icons in own row below */
     .deal-card .deal-row { flex-direction: column !important; align-items: stretch !important; flex-wrap: nowrap !important; }
     .deal-card .deal-top { flex-wrap: wrap; }
@@ -252,7 +252,7 @@
     /* Clickable stage badge: bigger tap area */
     .stage-badge { padding: 7px 14px; }
     /* Detail cards: tighter padding, readable headings */
-    .detail-card { padding: 16px; }
+    .detail-card { padding: 20px 18px 26px; }
     .detail-card h2 { font-size: 19px; }
     /* Offers / Page Views popup -> bottom sheet */
     #popup-overlay { padding: 0 !important; align-items: flex-end !important; }
@@ -273,6 +273,7 @@
     .dd-call { font-size: 20px; padding: 18px 12px; }
     /* Section modal body: less side padding on phones */
     .section-modal-body { padding: 4px 14px 24px; }
+    .section-modal-close { background: rgba(255,255,255,0.08); color: #e9edf3; border: 1px solid rgba(255,255,255,0.12); }
   }
   /* ===== DispoHub Dialer (single-column: card top, notes + dispos below) ===== */
   .dd-wrap { max-width: 560px; margin: 0 auto; }
@@ -620,12 +621,21 @@ function toggleStageMenu(dealId, curStage, e) {
   const rect = badge.getBoundingClientRect();
   const menu = document.createElement('div');
   menu.id = 'stage-menu-live';
-  menu.style.cssText = 'position:fixed;z-index:5000;background:#0b1626;border:1px solid #22385a;border-radius:10px;padding:6px;min-width:170px;box-shadow:0 8px 24px rgba(0,0,0,0.5);';
-  menu.style.top = (rect.bottom + 6) + 'px';
-  menu.style.right = Math.max(8, window.innerWidth - rect.right) + 'px';
+  menu.style.cssText = 'position:fixed;z-index:5000;background:#0b1626;border:1px solid #22385a;border-radius:10px;padding:6px;width:210px;max-width:calc(100vw - 16px);box-shadow:0 8px 24px rgba(0,0,0,0.5);';
   menu.innerHTML = DEAL_STAGES.map(st => `<div onclick="event.stopPropagation();closeStageMenu();setStage('${dealId}','${st.id}')" style="padding:12px;border-radius:8px;cursor:pointer;font-size:14px;color:${st.color};${st.id === curStage ? 'background:rgba(255,255,255,0.06);font-weight:700;' : ''}">${st.label}${st.id === curStage ? ' ✓' : ''}</div>`).join('');
   menu.onclick = e => e.stopPropagation();
   document.body.appendChild(menu);
+  // Position against the VISUAL viewport, clamped on-screen on both axes
+  // (the old right-anchor pushed the menu off the left edge on phones).
+  const vv = window.visualViewport || null;
+  const vw = vv ? vv.width : window.innerWidth;
+  const vh = vv ? vv.height : window.innerHeight;
+  const mw = menu.offsetWidth, mh = menu.offsetHeight;
+  let menuLeft = Math.min(Math.max(8, rect.left), Math.max(8, vw - mw - 8));
+  let menuTop = rect.bottom + 6;
+  if (menuTop + mh > vh - 8) menuTop = Math.max(8, rect.top - mh - 6);
+  menu.style.left = menuLeft + 'px';
+  menu.style.top = menuTop + 'px';
   // Close on next tap anywhere
   setTimeout(() => document.addEventListener('click', closeStageMenu, { once: true }), 0);
 }
