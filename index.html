@@ -234,6 +234,8 @@
     .form-grid { grid-template-columns: 1fr; }
     .form-field input, .form-field select, .form-field textarea { font-size: 16px; padding: 13px 12px; }
     .kpi-panel { overflow-x: auto; }
+  .deal-actions { flex-wrap: wrap; row-gap: 8px; }
+  .deal-actions .blast-btn { font-size: 15px !important; letter-spacing: -3px; padding: 0; }
     .btn-gold, .btn-ghost { min-height: 48px; }
     .deal-numbers { gap: 10px; }
     .call-link { min-height: 48px; display: inline-flex; align-items: center; font-size: 17px; }
@@ -454,6 +456,7 @@ let deals = [];
 let buyers = [];
 let openDealId = null;
 let openBuyerId = null;
+let buyerReturnDealId = null; // deal to return to from a buyer opened inside a deal
 
 /* ---------------- Helpers ---------------- */
 const $ = id => document.getElementById(id);
@@ -714,7 +717,7 @@ function renderBuyers() {
     html += list.map(b => {
       const personName = [b.firstName, b.lastName].filter(Boolean).join(' ');
       return `
-      <div class="buyer-card" onclick="openBuyer('${b.id}')">
+      <div class="buyer-card" onclick="openBuyer('${b.id}', null)">
         <div class="buyer-top">
           <span class="buyer-name">${esc(personName || b.name)}</span>
           <span class="buyer-type ${b.type === 'LLC' ? 'llc' : ''}">${esc(b.type || '—')}</span>
@@ -1056,9 +1059,9 @@ async function openDeal(id) {
           <h2>${esc(d.address)}</h2>
           <div class="addr-sub">${esc(d.city || '')}${d.city ? ', ' : ''}${esc(d.state || 'GA')} ${esc(d.zip || '')}${d.county ? ' · ' + esc(d.county) + ' Co' : ''}</div>
         </div>
-        <div style="display:flex;gap:8px;align-items:center;">
-          <button onclick="openEmailBlast('${d.id}')" title="Email Blast" style="background:rgba(200,147,42,0.15);border:1px solid rgba(200,147,42,0.4);border-radius:12px;width:44px;height:44px;font-size:20px;cursor:pointer;">📧🚀</button>
-          <button onclick="openSmsBlast('${d.id}')" title="SMS Blast" style="background:rgba(200,147,42,0.15);border:1px solid rgba(200,147,42,0.4);border-radius:12px;width:44px;height:44px;font-size:20px;cursor:pointer;">💬🚀</button>
+        <div class="deal-actions" style="display:flex;gap:8px;align-items:center;">
+          <button class="blast-btn" onclick="openEmailBlast('${d.id}')" title="Email Blast" style="background:rgba(200,147,42,0.15);border:1px solid rgba(200,147,42,0.4);border-radius:12px;width:44px;height:44px;font-size:20px;cursor:pointer;">📧🚀</button>
+          <button class="blast-btn" onclick="openSmsBlast('${d.id}')" title="SMS Blast" style="background:rgba(200,147,42,0.15);border:1px solid rgba(200,147,42,0.4);border-radius:12px;width:44px;height:44px;font-size:20px;cursor:pointer;">💬🚀</button>
           ${dialerUnlocked ? `<button onclick="startDialer('${d.id}')" title="Dialer — ${dialerCount} buyers ready for Call #1" style="background:rgba(200,147,42,0.15);border:1px solid rgba(200,147,42,0.4);border-radius:12px;width:44px;height:44px;font-size:22px;cursor:pointer;">📞</button>` : `<button title="Dialer locked — send SMS #1 first" disabled style="background:rgba(100,110,130,0.1);border:1px solid rgba(100,110,130,0.3);border-radius:12px;width:44px;height:44px;font-size:22px;opacity:0.4;cursor:not-allowed;">🔒</button>`}
           <button onclick="openViewsPopup('${d.id}')" title="Page views" style="background:rgba(200,147,42,0.15);border:1px solid rgba(200,147,42,0.4);border-radius:12px;width:44px;height:44px;font-size:22px;cursor:pointer;">👁️</button>
           <button onclick="openOffersPopup('${d.id}')" title="Offers" style="background:rgba(200,147,42,0.15);border:1px solid rgba(200,147,42,0.4);border-radius:12px;width:44px;height:44px;font-size:22px;cursor:pointer;">💰</button>
@@ -1137,7 +1140,7 @@ async function openDeal(id) {
         const pipeColors = { 'interested': '#7fb3ff', 'viewing': '#e8b84b', 'walkthrough': '#c9a0ff', 'offer': '#7fc98f', 'assigned': '#e8b84b' };
         const pipeLabels = { 'interested': 'Interested', 'viewing': 'Viewing', 'walkthrough': 'Walkthrough Scheduled', 'offer': 'Offer Submitted', 'assigned': 'Assigned' };
         return `
-        <div class="match-row"${b ? ` onclick="openBuyer('${b.id}')" style="cursor:pointer;"` : ''}>
+        <div class="match-row"${b ? ` onclick="openBuyer('${b.id}', '${id}')" style="cursor:pointer;"` : ''}>
           <div class="match-info">
             <div class="n">🏆 ${esc(nm)}${pipe ? ` <span style="font-size:11px;font-weight:700;color:${pipeColors[pipe] || '#8a97a8'};background:rgba(255,255,255,.06);border-radius:12px;padding:2px 8px;margin-left:4px;">${pipeLabels[pipe] || pipe}</span>` : ''}</div>
             ${person ? `<div class="w" style="color:#e8c476;">👤 ${esc(person)}</div>` : ''}
@@ -1196,7 +1199,7 @@ async function openDeal(id) {
         const bid = b ? b.id : null;
         const smsSentAP = bid && typeof smsContacted !== 'undefined' && smsContacted.has(bid);
         return `
-        <div class="match-row"${b ? ` onclick="openBuyer('${b.id}')" style="cursor:pointer;"` : ''}>
+        <div class="match-row"${b ? ` onclick="openBuyer('${b.id}', '${id}')" style="cursor:pointer;"` : ''}>
           <div class="match-info">
             <div class="n">${esc(nm)}${pipe ? ` <span style="font-size:11px;font-weight:700;color:${pipeColors[pipe] || '#8a97a8'};background:rgba(255,255,255,.06);border-radius:12px;padding:2px 8px;margin-left:4px;">${pipeLabels[pipe] || pipe}</span>` : ''}</div>
             ${person ? `<div class="w" style="color:#e8c476;">👤 ${esc(person)}</div>` : ''}
@@ -2282,6 +2285,29 @@ function withTimeout(promise, ms) {
   ]);
 }
 
+/* KPI date range: Today / 7 / 30 / Quarter(90) / Year(365) / All Time(0) */
+let kpiRangeDays = 0;
+const KPI_RANGES = [[1, 'Today'], [7, 'Last 7 Days'], [30, 'Last 30 Days'], [90, 'Last Quarter'], [365, 'Last Year'], [0, 'All Time']];
+function setKpiRange(n) { kpiRangeDays = n; renderKPIs(); }
+function kpiRangeLabel() { const r = KPI_RANGES.find(x => x[0] === kpiRangeDays); return r ? r[1] : 'All Time'; }
+function kpiDateOf(v) {
+  if (!v) return null;
+  if (typeof v === 'string' || typeof v === 'number') { const d = new Date(v); return isNaN(d) ? null : d; }
+  try { if (v.toDate) return v.toDate(); } catch (e) {}
+  if (v.seconds != null) return new Date(v.seconds * 1000);
+  return null;
+}
+function kpiCutoffDate() {
+  if (!kpiRangeDays) return null;
+  if (kpiRangeDays === 1) { const d = new Date(); d.setHours(0, 0, 0, 0); return d; }
+  return new Date(Date.now() - kpiRangeDays * 86400000);
+}
+function kpiInRange(v) {
+  const cut = kpiCutoffDate();
+  if (!cut) return true;
+  const d = kpiDateOf(v);
+  return d ? d >= cut : false;
+}
 async function renderKPIs() {
   sectionContentEl().innerHTML = '<div class="empty-state">Loading KPIs…</div>';
   // Deal stats are local — render the full dashboard immediately, then patch
@@ -2291,8 +2317,9 @@ async function renderKPIs() {
   const closedDeals = deals.filter(d => d.stage === 'closed');
   const assignedDeals = deals.filter(d => d.stage === 'assigned');
   const totalFees = closedDeals.reduce((s, d) => s + (+d.assignmentFee || 0), 0);
-  // Walkthroughs scheduled — deals with a walkthrough date set
-  const walkthroughs = deals.filter(d => d.transWalkthrough && String(d.transWalkthrough).trim()).length;
+  // Walkthroughs scheduled — buyers whose per-deal pipeline status is 'walkthrough'
+  let walkthroughs = 0;
+  buyers.forEach(b => { if (b.dealPipeline) Object.values(b.dealPipeline).forEach(v => { if (v === 'walkthrough') walkthroughs++; }); });
   // Avg days under contract → assigned/closed
   let daySum = 0, dayN = 0;
   deals.forEach(d => {
@@ -2304,17 +2331,18 @@ async function renderKPIs() {
   if (typeof Chart !== 'undefined') Chart.defaults.font.family = "'Inter', system-ui, sans-serif";
   const cards = [
     [active.length, 'Active deals', 'under contract → offers in', '#5b8fd4', ''],
-    ['…', 'Total offers', 'across all deals', '#c084fc', ' id="kpi-num-offers"'],
-    ['…', 'Calls made', 'tap-to-dial logged', '#5b8fd4', ' id="kpi-num-calls"'],
-    ['…', 'SMS sent', 'blasts + one-off', '#c084fc', ' id="kpi-num-sms"'],
-    [walkthroughs, 'Walkthroughs', 'scheduled', '#d4a843', ''],
+    ['…', 'Total offers', kpiRangeLabel(), '#c084fc', ' id="kpi-num-offers"'],
+    ['…', 'Calls made', kpiRangeLabel(), '#5b8fd4', ' id="kpi-num-calls"'],
+    ['…', 'SMS sent', kpiRangeLabel(), '#c084fc', ' id="kpi-num-sms"'],
+    [walkthroughs, 'Walkthroughs', 'buyers scheduled', '#d4a843', ''],
     [assignedDeals.length, 'Assigned', '', '#d4a843', ''],
     [closedDeals.length, 'Closed', '', '#4caf82', ''],
     [money(totalFees), 'Fees collected', 'closed deals', '#e0954a', ''],
     [dayN ? Math.round(daySum / dayN) : '—', 'Avg days to assign', dayN ? `over ${dayN} deals` : '', '#e9edf3', ''],
   ];
   sectionContentEl().innerHTML = `
-    <div style="font-size:18px;font-weight:800;margin:6px 0 16px;">📊 KPIs</div>
+    <div style="font-size:18px;font-weight:800;margin:6px 0 12px;">📊 KPIs</div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px;">${KPI_RANGES.map(r => `<button onclick="setKpiRange(${r[0]})" style="min-height:36px;padding:6px 14px;border-radius:20px;border:1px solid ${kpiRangeDays === r[0] ? '#c8932a' : 'rgba(255,255,255,0.15)'};background:${kpiRangeDays === r[0] ? '#c8932a' : 'rgba(255,255,255,0.05)'};color:${kpiRangeDays === r[0] ? '#0d1b2a' : '#aeb9c7'};font-weight:${kpiRangeDays === r[0] ? '800' : '600'};font-size:13px;cursor:pointer;">${r[1]}</button>`).join('')}</div>
     <div class="kpi-cards">` + cards.map(c =>
       `<div class="kpi-card"><span class="kpi-num" style="color:${c[3]};"${c[4]}>${c[0]}</span><span class="kpi-label">${c[1]}</span>${c[2] ? `<div class="kpi-card-sub">${c[2]}</div>` : ''}</div>`).join('') + `</div>
     <div class="kpi-grid">
@@ -2340,36 +2368,47 @@ async function renderKPIs() {
         <div id="kpi-recent-offers"><div class="timeline-empty">Loading offers…</div></div>
       </div>
     </div>`;
-  // — Firestore-backed numbers: patched in as they land, timeouts on every query —
+  // — Firestore-backed numbers: patched in as they land; every query gets a
+  //    timeout AND one retry, so a stalled first connection can't blank a card —
   const setNum = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
+  const getWithRetry = async (q) => {
+    try { return await withTimeout(q(), 10000); }
+    catch (e) { await new Promise(r => setTimeout(r, 1500)); return await withTimeout(q(), 10000); }
+  };
   try {
-    const offersSnap = await withTimeout(db.collection('dispoOffers').get(), 8000);
-    const offers = offersSnap.docs.map(o => o.data());
+    const offersSnap = await getWithRetry(() => db.collection('dispoOffers').get());
+    const offers = offersSnap.docs.map(o => o.data()).filter(o => kpiInRange(o.createdAt));
     setNum('kpi-num-offers', offers.length);
     const ro = document.getElementById('kpi-recent-offers');
-    if (ro) ro.innerHTML = offers.sort((a, b) => tsStr(b.createdAt).localeCompare(tsStr(a.createdAt))).slice(0, 10).map(o => {
-      const d = deals.find(x => x.id === o.dealId);
-      return `<div class="match-row"><div class="match-info">
-        <div class="n">${money(o.amount)} <span style="font-weight:400;color:#8a97a8;">— ${esc(o.buyerName || '')}</span></div>
-        <div class="w">${esc(d ? d.address : '')} · ${esc(fmtDate((o.createdAt || '').slice(0, 10)))}</div>
-      </div></div>`;
-    }).join('') || '<div class="timeline-empty">No offers yet.</div>';
+    if (ro) {
+      try {
+        ro.innerHTML = offers.sort((a, b) => tsStr(b.createdAt).localeCompare(tsStr(a.createdAt))).slice(0, 10).map(o => {
+          const d = deals.find(x => x.id === o.dealId);
+          return `<div class="match-row"><div class="match-info">
+            <div class="n">${money(o.amount)} <span style="font-weight:400;color:#8a97a8;">— ${esc(o.buyerName || '')}</span></div>
+            <div class="w">${esc(d ? d.address : '')} · ${esc(fmtDate(tsStr(o.createdAt).slice(0, 10)))}</div>
+          </div></div>`;
+        }).join('') || '<div class="timeline-empty">No offers in this range.</div>';
+      } catch (re) { ro.innerHTML = '<div class="timeline-empty">Offers loaded — the list failed to render.</div>'; }
+    }
   } catch (e) {
     setNum('kpi-num-offers', '—');
     const ro = document.getElementById('kpi-recent-offers');
-    if (ro) ro.innerHTML = '<div class="timeline-empty">Could not load offers.</div>';
+    if (ro) ro.innerHTML = `<div class="timeline-empty">Could not load offers (${esc(e.code || e.message || 'error')}).</div>`;
   }
   try {
-    const actSnap = await withTimeout(db.collection('dispoActivity').where('type', '==', 'dial_clicked').get(), 8000);
-    setNum('kpi-num-calls', actSnap.size);
+    const actSnap = await getWithRetry(() => db.collection('dispoActivity').where('type', '==', 'dial_clicked').get());
+    let calls = 0;
+    actSnap.docs.forEach(doc => { if (kpiInRange(doc.data().at)) calls++; });
+    setNum('kpi-num-calls', calls);
   } catch (e) { setNum('kpi-num-calls', '—'); }
   try {
-    const smsSnap = await withTimeout(db.collection('dispoSmsBlasts').get(), 8000);
+    const smsSnap = await getWithRetry(() => db.collection('dispoSmsBlasts').get());
     let smsSent = 0;
     smsSnap.docs.forEach(doc => {
       const b = doc.data();
-      if (b.type === 'blast') smsSent += (+b.sent || 0);
-      else smsSent += 1; // one-off
+      if (!kpiInRange(b.startedAt || b.createdAt || b.sentAt || b.at)) return;
+      smsSent += b.type === 'blast' ? (+b.sent || 0) : 1; // blast total, or one-off
     });
     setNum('kpi-num-sms', smsSent);
   } catch (e) { setNum('kpi-num-sms', '—'); }
@@ -3521,7 +3560,7 @@ function showBuyerForm(buyerId) {
   const fld = (key, label, val, type) =>
     `<div class="form-field"><label>${label}</label><input type="${type || 'text'}" id="bf-${key}" value="${esc(val == null ? '' : val)}"></div>`;
   $('content').innerHTML = `<div class="detail-wrap">
-    <button class="back-btn" onclick="switchTab('buyers')">← Back to buyers</button>
+    ${b.id ? `<button class="back-btn" onclick="openBuyer('${b.id}')">← Back to buyer</button>` : `<button class="back-btn" onclick="switchTab('buyers')">← Back to buyers</button>`}
     <div class="detail-card">
       <h2>${b.id ? 'Edit Buyer' : 'New Buyer'}</h2>
       <div class="addr-sub">Pushed by DISPO MANAGER after skip tracing, or added manually.</div>
@@ -3593,7 +3632,8 @@ async function saveBuyerForm(id) {
     await loadAll(); switchTab('buyers');
   }
 }
-function openBuyer(id) {
+function openBuyer(id, fromDealId) {
+  if (fromDealId !== undefined) buyerReturnDealId = fromDealId || null;
   openBuyerId = id;
   const b = buyers.find(x => x.id === id);
   if (!b) { switchTab('buyers'); return; }
@@ -3603,7 +3643,7 @@ function openBuyer(id) {
     .filter(r => r.score > 0)
     .sort((a, c) => c.score - a.score);
   $('content').innerHTML = `<div class="detail-wrap">
-    <button class="back-btn" onclick="switchTab('buyers')">← Back to buyers</button>
+    ${buyerReturnDealId ? `<button class="back-btn" onclick="openDeal('${buyerReturnDealId}')">← Back to deal</button>` : `<button class="back-btn" onclick="switchTab('buyers')">← Back to buyers</button>`}
     <div class="detail-card">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap;">
         <div>
