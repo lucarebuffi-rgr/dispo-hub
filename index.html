@@ -555,6 +555,45 @@ async function getActivity(dealId) {
   return snap.docs.map(d => d.data()).sort((a, b) => tsStr(b.at).localeCompare(tsStr(a.at)));
 }
 
+/* Per-deal KPI patch-ins: SMS / email / page-view totals for one deal.
+   The rest of the Deal KPIs card renders instantly from data openDeal already has. */
+async function loadDealKpis(dealId) {
+  const setTxt = (eid, v) => { const el = document.getElementById(eid); if (el) el.textContent = v; };
+  const getRetry = async (q) => {
+    try { return await withTimeout(q(), 10000); }
+    catch (e) { await new Promise(r => setTimeout(r, 1200)); return await withTimeout(q(), 10000); }
+  };
+  try {
+    const s = await getRetry(() => db.collection('dispoSmsBlasts').where('dealId', '==', dealId).get());
+    let n = 0;
+    s.docs.forEach(doc => { const b = doc.data(); n += b.type === 'blast' ? (+b.sent || 0) : 1; });
+    setTxt('dk-sms', n);
+  } catch (e) { setTxt('dk-sms', '—'); }
+  try {
+    const s = await getRetry(() => db.collection('dispoEmailBlasts').where('dealId', '==', dealId).get());
+    let n = 0;
+    s.docs.forEach(doc => { const b = doc.data(); n += b.type === 'blast' ? (+b.sent || 0) : 1; });
+    setTxt('dk-emails', n);
+  } catch (e) { setTxt('dk-emails', '—'); }
+  try {
+    const s = await getRetry(() => db.collection('dispoPageViews').where('dealId', '==', dealId).get());
+    const docs = s.docs.map(x => x.data());
+    const pageViews = docs.filter(v => v.type === 'view');
+    const sessions = {};
+    pageViews.forEach(v => {
+      const sid = v.sessionId || 'unknown';
+      if (!sessions[sid]) sessions[sid] = { views: 0, time: 0, clicks: [] };
+      sessions[sid].views++;
+    });
+    docs.filter(v => v.type === 'time').forEach(v => { const g = sessions[v.sessionId || 'unknown']; if (g) g.time += (+v.seconds || 0); });
+    docs.filter(v => v.type === 'click').forEach(v => { const g = sessions[v.sessionId || 'unknown']; if (g) g.clicks.push(v.action); });
+    const list = Object.values(sessions);
+    const hot = list.filter(g => g.time > 60 || g.views > 2 || g.clicks.includes('offer_submit_attempt')).length;
+    setTxt('dk-views', pageViews.length);
+    setTxt('dk-views-sub', list.length + ' visitors · 🔥 ' + hot + ' hot');
+  } catch (e) { setTxt('dk-views', '—'); setTxt('dk-views-sub', 'unavailable'); }
+}
+
 /* ================= Buyer Match Engine (SmartMatch-style) =================
    Scores each buyer against a deal. Sources are pluggable — the engine only
    cares about buyer.buyingZips[], buyer.buyingCounties[], buy box text,
@@ -1061,6 +1100,15 @@ async function openDeal(id) {
     dialerCount = [...pulledIds].filter(bid => smsContacted.has(bid)).length;
     dialerUnlocked = dialerCount > 0;
   } catch (e) { dialerUnlocked = false; dialerCount = 0; }
+  // Per-deal KPI strip values (SMS/email/views patch in via loadDealKpis)
+  const dkWithPhone = pulledBuyers.filter(r => r._buyer && r._buyer.phone && digitsOnly(r._buyer.phone).length >= 10).length;
+  const dkCreated = d.createdAt ? new Date(tsStr(d.createdAt)) : null;
+  const dkDays = dkCreated && !isNaN(dkCreated) ? Math.max(0, Math.floor((Date.now() - dkCreated.getTime()) / 86400000)) : null;
+  const dkCalls = activity.filter(a => a.type === 'dial_clicked').length;
+  const dkPipe = { interested: 0, viewing: 0, walkthrough: 0, offer: 0, assigned: 0 };
+  buyers.forEach(b => { const p = b.dealPipeline && b.dealPipeline[d.id]; if (p && dkPipe[p] != null) dkPipe[p]++; });
+  const dkPipeLabels = { interested: 'Interested', viewing: 'Viewing', walkthrough: 'Walkthrough', offer: 'Offer Submitted', assigned: 'Assigned' };
+  const dkPipeColors = { interested: '#7fb3ff', viewing: '#e8b84b', walkthrough: '#c9a0ff', offer: '#7fc98f', assigned: '#e8b84b' };
   $('content').innerHTML = `<div class="detail-wrap">
     <button class="back-btn" onclick="switchTab('deals')">← Back to deals</button>
     <div class="detail-card">
@@ -1122,6 +1170,22 @@ async function openDeal(id) {
       </div>
     </div>
 
+    <div class="detail-card">
+      <div class="section-label" style="margin-top:0;">📊 Deal KPIs</div>
+      <div class="kpi-cards" style="margin-bottom:10px;">
+        <div class="kpi-card"><span class="kpi-num" style="color:#c084fc;">${offers.length}</span><span class="kpi-label">Offers</span><div class="kpi-card-sub">${offers.length ? 'best ' + money(offers[0].amount) : 'none yet'}</div></div>
+        <div class="kpi-card"><span class="kpi-num" style="color:#5b8fd4;">${dkCalls}</span><span class="kpi-label">Calls made</span><div class="kpi-card-sub">tap-to-dial</div></div>
+        <div class="kpi-card"><span class="kpi-num" style="color:#c084fc;" id="dk-sms">…</span><span class="kpi-label">SMS sent</span><div class="kpi-card-sub">blasts + one-off</div></div>
+        <div class="kpi-card"><span class="kpi-num" style="color:#7fc98f;">${dialerCount}</span><span class="kpi-label">Buyers texted</span><div class="kpi-card-sub">of ${dkWithPhone} w/ phone${dkWithPhone ? ' · ' + Math.round(dialerCount / dkWithPhone * 100) + '%' : ''}</div></div>
+        <div class="kpi-card"><span class="kpi-num" style="color:#e0954a;" id="dk-emails">…</span><span class="kpi-label">Emails sent</span><div class="kpi-card-sub">blasts + one-off</div></div>
+        <div class="kpi-card"><span class="kpi-num" style="color:#5b8fd4;" id="dk-views">…</span><span class="kpi-label">Page views</span><div class="kpi-card-sub" id="dk-views-sub">deal page</div></div>
+        <div class="kpi-card"><span class="kpi-num" style="color:#d4a843;">${pulledBuyers.length}</span><span class="kpi-label">Buyers pulled</span><div class="kpi-card-sub">${topRanked.length} 🏆 Smart Match</div></div>
+        <div class="kpi-card"><span class="kpi-num" style="color:#e9edf3;">${dkDays == null ? '—' : dkDays}</span><span class="kpi-label">Days active</span><div class="kpi-card-sub">${dkDays == null ? '' : 'since ' + esc(fmtDate(tsStr(d.createdAt).slice(0, 10)))}</div></div>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        ${Object.keys(dkPipe).map(k => `<span style="font-size:12px;font-weight:700;color:${dkPipe[k] ? dkPipeColors[k] : '#5c6b82'};background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.08);border-radius:14px;padding:5px 11px;">${dkPipeLabels[k]}: ${dkPipe[k]}</span>`).join('')}
+      </div>
+    </div>
 
     <div class="detail-card">
       <h2 style="font-size:18px;">🗺 Buyer Map <span id="deal-map-count" style="color:#8a97a8;font-size:13px;font-weight:400;"></span></h2>
@@ -1269,6 +1333,7 @@ async function openDeal(id) {
   </div>`;
   window.scrollTo(0, 0);
   try { initDealBuyerMap(d, pulledBuyers); } catch (e) { console.error('deal map init failed', e); }
+  loadDealKpis(d.id);
   if (d.driveFolderUrl && editingDriveFor !== d.id) {
     fetchDrivePhotos(d.id, d.driveFolderUrl);
     fetchDriveFolderName(d.id, d.driveFolderUrl);
