@@ -1072,7 +1072,7 @@ async function openDeal(id) {
   const d = deals.find(x => x.id === id);
   if (!d) { switchTab('deals'); return; }
   const offersSnap = await db.collection('dispoOffers').where('dealId', '==', id).get();
-  const offers = offersSnap.docs.map(o => ({ id: o.id, ...o.data() })).sort((a, b) => (+b.amount || 0) - (+a.amount || 0));
+  const offers = offersSnap.docs.map(o => ({ id: o.id, ...o.data() })).sort((a, b) => (+b.amount || +b.offerAmount || 0) - (+a.amount || +a.offerAmount || 0));
   // InvestorBase pulled buyers linked to this deal via dispoBuyerSearchResults
   let pulledBuyers = [];
   try {
@@ -1173,7 +1173,7 @@ async function openDeal(id) {
     <div class="detail-card">
       <div class="section-label" style="margin-top:0;">📊 Deal KPIs</div>
       <div class="kpi-cards" style="margin-bottom:10px;">
-        <div class="kpi-card"><span class="kpi-num" style="color:#c084fc;">${offers.length}</span><span class="kpi-label">Offers</span><div class="kpi-card-sub">${offers.length ? 'best ' + money(offers[0].amount) : 'none yet'}</div></div>
+        <div class="kpi-card"><span class="kpi-num" style="color:#c084fc;">${offers.length}</span><span class="kpi-label">Offers</span><div class="kpi-card-sub">${offers.length ? 'best ' + money(offers[0].amount || offers[0].offerAmount || 0) : 'none yet'}</div></div>
         <div class="kpi-card"><span class="kpi-num" style="color:#5b8fd4;">${dkCalls}</span><span class="kpi-label">Calls made</span><div class="kpi-card-sub">tap-to-dial</div></div>
         <div class="kpi-card"><span class="kpi-num" style="color:#c084fc;" id="dk-sms">…</span><span class="kpi-label">SMS sent</span><div class="kpi-card-sub">blasts + one-off</div></div>
         <div class="kpi-card"><span class="kpi-num" style="color:#7fc98f;">${dialerCount}</span><span class="kpi-label">Buyers texted</span><div class="kpi-card-sub">of ${dkWithPhone} w/ phone${dkWithPhone ? ' · ' + Math.round(dialerCount / dkWithPhone * 100) + '%' : ''}</div></div>
@@ -2460,7 +2460,7 @@ async function renderKPIs() {
         ro.innerHTML = offers.sort((a, b) => tsStr(b.createdAt).localeCompare(tsStr(a.createdAt))).slice(0, 10).map(o => {
           const d = deals.find(x => x.id === o.dealId);
           return `<div class="match-row"><div class="match-info">
-            <div class="n">${money(o.amount)} <span style="font-weight:400;color:#8a97a8;">— ${esc(o.buyerName || '')}</span></div>
+            <div class="n">${money(o.amount || o.offerAmount || 0)} <span style="font-weight:400;color:#8a97a8;">— ${esc(o.buyerName || '')}</span></div>
             <div class="w">${esc(d ? d.address : '')} · ${esc(fmtDate(tsStr(o.createdAt).slice(0, 10)))}</div>
           </div></div>`;
         }).join('') || '<div class="timeline-empty">No offers in this range.</div>';
