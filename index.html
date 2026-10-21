@@ -1088,6 +1088,17 @@ async function openDeal(id) {
   const activity = await getActivity(id);
   const compsSnap = await db.collection('dispoComps').where('dealId', '==', id).get();
   const allComps = compsSnap.docs.map(c => ({ id: c.id, ...c.data() })).sort((a, b) => (+b.soldPrice || 0) - (+a.soldPrice || 0));
+  // Follow-up tasks for buyers on this deal (stage section renders from this)
+  let buyerTasks = [];
+  try {
+    const tsnap = await db.collection('dispoBuyerTasks').where('dealId', '==', id).get();
+    buyerTasks = tsnap.docs.map(t => ({ id: t.id, ...t.data() }));
+  } catch (e) { console.error('buyer tasks query failed', e); buyerTasks = []; }
+  const tasksByBuyer = {};
+  buyerTasks.forEach(t => { (tasksByBuyer[t.buyerId] = tasksByBuyer[t.buyerId] || []).push(t); });
+  const stagedBuyers = buyers.filter(b => b.dealPipeline && b.dealPipeline[id]);
+  const buyersByStage = {};
+  ['interested', 'viewing', 'walkthrough', 'offer', 'assigned'].forEach(s => { buyersByStage[s] = stagedBuyers.filter(b => b.dealPipeline[id] === s).sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''))); });
   const invComps = allComps.filter(c => c.compType !== 'retail');
   const retComps = allComps.filter(c => c.compType === 'retail');
   const dl = daysLeft(d.closeByDate);
@@ -1183,8 +1194,18 @@ async function openDeal(id) {
         <div class="kpi-card"><span class="kpi-num" style="color:#e9edf3;">${dkDays == null ? '—' : dkDays}</span><span class="kpi-label">Days active</span><div class="kpi-card-sub">${dkDays == null ? '' : 'since ' + esc(fmtDate(tsStr(d.createdAt).slice(0, 10)))}</div></div>
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;">
-        ${Object.keys(dkPipe).map(k => `<span style="font-size:12px;font-weight:700;color:${dkPipe[k] ? dkPipeColors[k] : '#5c6b82'};background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.08);border-radius:14px;padding:5px 11px;">${dkPipeLabels[k]}: ${dkPipe[k]}</span>`).join('')}
+        ${Object.keys(dkPipe).map(k => `<span onclick="document.getElementById('stage-buyers-card').scrollIntoView({behavior:'smooth'})" title="Jump to Buyers by Stage" style="cursor:pointer;font-size:12px;font-weight:700;color:${dkPipe[k] ? dkPipeColors[k] : '#5c6b82'};background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.08);border-radius:14px;padding:5px 11px;">${dkPipeLabels[k]}: ${dkPipe[k]}</span>`).join('')}
       </div>
+    </div>
+
+    <div class="detail-card" id="stage-buyers-card">
+      <h2 style="font-size:18px;">🎯 Buyers by Stage <span style="color:#8a97a8;font-size:13px;font-weight:400;">(${stagedBuyers.length})</span></h2>
+      <div class="addr-sub">Every buyer you've moved into a stage on this deal, grouped by stage. Follow-up tasks live on each buyer.</div>
+      ${['interested', 'viewing', 'walkthrough', 'offer', 'assigned'].map(stage => `
+      <div style="margin-top:16px;">
+        <div style="font-weight:800;font-size:13px;letter-spacing:.5px;color:${dkPipeColors[stage]};">${dkPipeLabels[stage].toUpperCase() === 'WALKTHROUGH' ? 'WALKTHROUGH SCHEDULED' : dkPipeLabels[stage].toUpperCase()} · ${buyersByStage[stage].length}</div>
+        ${buyersByStage[stage].length ? buyersByStage[stage].map(b => buyerStageRowHtml(b, id, tasksByBuyer[b.id] || [])).join('') : '<div style="font-size:13px;color:#5c6b82;padding:6px 0;">No buyers at this stage yet.</div>'}
+      </div>`).join('')}
     </div>
 
     <div class="detail-card">
@@ -3756,6 +3777,19 @@ function openBuyer(id, fromDealId) {
       <div style="margin-top:18px;display:flex;gap:10px;flex-wrap:wrap;"><button class="btn-ghost" onclick='showBuyerForm(${JSON.stringify(b.id)})'>✏️ Edit Buyer</button><button class="btn-ghost" onclick="linkBuyerToDeal('${b.id}')">🔗 Link to Deal</button></div>
     </div>
     <div class="detail-card">
+      <h2 style="font-size:18px;">✅ Follow-up Tasks <span id="buyer-tasks-count" style="color:#8a97a8;font-size:13px;font-weight:400;"></span></h2>
+      <div id="buyer-tasks-body"><div class="timeline-empty">Loading tasks…</div></div>
+      <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+        <input type="text" id="tf-text-${b.id}-b" placeholder="Follow-up task — e.g. Call back Tuesday about the walkthrough" style="flex:1;min-width:200px;padding:10px 12px;border-radius:10px;border:1px solid #22385a;background:#0b1626;color:#e9edf3;font-size:14px;">
+        <input type="date" id="tf-date-${b.id}-b" style="padding:9px 10px;border-radius:10px;border:1px solid #22385a;background:#0b1626;color:#e9edf3;font-size:14px;min-height:42px;">
+        <select id="tf-deal-${b.id}-b" style="padding:9px 10px;border-radius:10px;border:1px solid #22385a;background:#0b1626;color:#e9edf3;font-size:14px;min-height:42px;max-width:220px;">
+          <option value="">General (no deal)</option>
+          ${deals.map(dd => `<option value="${dd.id}"${buyerReturnDealId === dd.id ? ' selected' : ''}>${esc(dd.address || 'Deal')}</option>`).join('')}
+        </select>
+        <button class="btn-gold" style="padding:10px 16px;min-height:0;" onclick="saveBuyerTask('${b.id}', null, 'b')">+ Add Task</button>
+      </div>
+    </div>
+    <div class="detail-card">
       <h2 style="font-size:18px;">📦 Matching Deals <span style="color:#8a97a8;font-size:13px;font-weight:400;">(${matched.length})</span></h2>
       ${matched.length ? matched.map(m => `
         <div class="match-row" onclick="openDeal('${m.deal.id}')" style="cursor:pointer;">
@@ -3767,7 +3801,116 @@ function openBuyer(id, fromDealId) {
         </div>`).join('') : '<div class="timeline-empty">No current deals match this buyer.</div>'}
     </div>
   </div>`;
+  loadBuyerTasksCard(id);
   window.scrollTo(0, 0);
+}
+
+
+/* ================= ✅ Buyer Follow-up Tasks + Buyers by Stage =================
+   Tasks live in Firestore `dispoBuyerTasks`: { buyerId, dealId (nullable),
+   text, dueDate ('YYYY-MM-DD' or ''), done, createdAt, completedAt }.
+   Shown grouped by deal stage inside the deal view, and on the buyer page. */
+const PIPE_LABELS = { interested: 'Interested', viewing: 'Viewing', walkthrough: 'Walkthrough Scheduled', offer: 'Offer Submitted', assigned: 'Assigned' };
+const PIPE_COLORS = { interested: '#7fb3ff', viewing: '#e8b84b', walkthrough: '#c9a0ff', offer: '#7fc98f', assigned: '#e8b84b' };
+function taskTodayStr() { const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
+function taskDueChip(t) {
+  if (!t.dueDate) return '';
+  const overdue = !t.done && t.dueDate < taskTodayStr();
+  const isToday = t.dueDate === taskTodayStr();
+  const bg = overdue ? 'rgba(217,83,79,.18)' : 'rgba(255,255,255,.06)';
+  const col = overdue ? '#e07a77' : (isToday ? '#e8b84b' : '#8a97a8');
+  return `<span style="font-size:11px;font-weight:700;color:${col};background:${bg};border-radius:10px;padding:2px 8px;margin-left:6px;white-space:nowrap;">📅 ${esc(fmtDate(t.dueDate))}${overdue ? ' · OVERDUE' : (isToday ? ' · today' : '')}</span>`;
+}
+function buyerTaskRowHtml(t, mode, buyerId, showDeal) {
+  const deal = showDeal ? (t.dealId ? (deals.find(x => x.id === t.dealId) || null) : null) : null;
+  const dealChip = showDeal ? `<span style="font-size:11px;font-weight:700;color:#8a97a8;background:rgba(255,255,255,.06);border-radius:10px;padding:2px 8px;margin-left:6px;white-space:nowrap;">${t.dealId ? '🏠 ' + esc(deal ? deal.address : 'Deal') : 'General'}</span>` : '';
+  return `<div style="display:flex;gap:8px;align-items:flex-start;padding:7px 0;border-top:1px solid rgba(255,255,255,0.05);">
+    <input type="checkbox" ${t.done ? 'checked' : ''} onchange="setBuyerTaskDone('${t.id}', this.checked, '${mode}', '${buyerId}')" title="Mark done" style="width:18px;height:18px;margin-top:1px;flex-shrink:0;cursor:pointer;">
+    <div style="flex:1;font-size:13px;${t.done ? 'color:#5c6b82;text-decoration:line-through;' : 'color:#dbe4f0;'}">${esc(t.text)}${taskDueChip(t)}${dealChip}</div>
+    <button onclick="armConfirm(this, () => deleteBuyerTask('${t.id}', '${mode}', '${buyerId}'))" title="Delete task" style="background:none;border:none;color:#e07a77;font-size:14px;cursor:pointer;padding:0 2px;flex-shrink:0;">🗑️</button>
+  </div>`;
+}
+function buyerStageRowHtml(b, dealId, tasks) {
+  const person = [b.firstName, b.lastName].filter(Boolean).join(' ');
+  const open = (tasks || []).filter(t => !t.done).sort((a, c) => String(a.dueDate || '9999').localeCompare(String(c.dueDate || '9999')) || tsStr(a.createdAt).localeCompare(tsStr(c.createdAt)));
+  const doneCount = (tasks || []).length - open.length;
+  const pipe = (b.dealPipeline && b.dealPipeline[dealId]) || '';
+  return `<div class="match-row">
+    <div class="match-info">
+      <div class="n" onclick="openBuyer('${b.id}', '${dealId}')" style="cursor:pointer;">${esc(b.name || person || 'Unknown buyer')}</div>
+      ${person && person !== b.name ? `<div class="w" style="color:#e8c476;">👤 ${esc(person)}</div>` : ''}
+      <div class="w">${b.phone ? `<a class="call-link" href="tel:${digitsOnly(b.phone)}" onclick="event.stopPropagation();logDispoDialClick('${b.id}','${dealId}')">📞 ${esc(formatPhone(b.phone))}</a>` : '<span style="color:#e07a77;">⚠️ No phone</span>'}${b.email ? ` · ✉️ ${esc(b.email)}` : ''}</div>
+      <div style="margin-top:6px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+        <select onchange="setBuyerDealPipeline('${b.id}', '${dealId}', this.value)" style="font-size:12px;padding:6px 8px;border-radius:8px;border:1px solid #22385a;background:#0b1626;color:#e9edf3;min-height:36px;">
+          <option value="">Set deal status…</option>
+          ${Object.entries(PIPE_LABELS).map(([v, l]) => `<option value="${v}"${pipe === v ? ' selected' : ''}>${l}</option>`).join('')}
+        </select>
+        <button class="btn-ghost" style="padding:6px 12px;min-height:36px;font-size:12px;" onclick="toggleTaskForm('${b.id}', 'd')">✅ Tasks (${open.length} open)</button>
+      </div>
+      <div id="tf-wrap-${b.id}-d" style="display:none;margin-top:4px;">
+        ${open.length ? open.map(t => buyerTaskRowHtml(t, 'd', b.id, false)).join('') : '<div style="font-size:13px;color:#5c6b82;padding:6px 0;">No open tasks for this buyer.</div>'}
+        ${doneCount ? `<div style="font-size:12px;color:#5c6b82;padding-top:4px;">${doneCount} completed task${doneCount > 1 ? 's' : ''} — see the buyer's page for history</div>` : ''}
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;">
+          <input type="text" id="tf-text-${b.id}-d" placeholder="Follow-up task — e.g. Send the walkthrough photos" style="flex:1;min-width:180px;padding:9px 11px;border-radius:10px;border:1px solid #22385a;background:#0b1626;color:#e9edf3;font-size:13px;">
+          <input type="date" id="tf-date-${b.id}-d" style="padding:8px 10px;border-radius:10px;border:1px solid #22385a;background:#0b1626;color:#e9edf3;font-size:13px;min-height:40px;">
+          <button class="btn-gold" style="padding:8px 14px;min-height:0;" onclick="saveBuyerTask('${b.id}', '${dealId}', 'd')">+ Add</button>
+        </div>
+      </div>
+    </div>
+  </div>`;
+}
+function toggleTaskForm(buyerId, mode) {
+  const el = document.getElementById(`tf-wrap-${buyerId}-${mode}`);
+  if (el) el.style.display = el.style.display === 'none' ? 'block' : 'none';
+}
+function rerenderTaskView(mode, buyerId, dealId) {
+  if (mode === 'd' && dealId) openDeal(dealId);
+  else openBuyer(buyerId);
+}
+async function saveBuyerTask(buyerId, dealId, mode) {
+  const textEl = document.getElementById(`tf-text-${buyerId}-${mode}`);
+  const dateEl = document.getElementById(`tf-date-${buyerId}-${mode}`);
+  const text = textEl ? textEl.value.trim() : '';
+  if (!text) { showToast('Write the task first'); return; }
+  let dId = dealId || null;
+  if (mode === 'b') { const sel = document.getElementById(`tf-deal-${buyerId}-b`); dId = sel ? (sel.value || null) : null; }
+  try {
+    await db.collection('dispoBuyerTasks').add({ buyerId, dealId: dId, text, dueDate: dateEl ? (dateEl.value || '') : '', done: false, createdAt: new Date().toISOString(), completedAt: null });
+    if (dId) { try { await logActivity(dId, `✅ Follow-up task added for ${ddBuyerName(buyers.find(x => x.id === buyerId) || {})}: ${text}`); } catch (e) {} }
+    showToast('Task added ✓');
+    rerenderTaskView(mode, buyerId, dId);
+  } catch (e) { showToast('Failed: ' + e.message); }
+}
+async function setBuyerTaskDone(taskId, done, mode, buyerId) {
+  try {
+    await db.collection('dispoBuyerTasks').doc(taskId).set({ done: !!done, completedAt: done ? new Date().toISOString() : null }, { merge: true });
+    showToast(done ? 'Task done ✓' : 'Task reopened');
+    rerenderTaskView(mode, buyerId, openDealId);
+  } catch (e) { showToast('Failed: ' + e.message); }
+}
+async function deleteBuyerTask(taskId, mode, buyerId) {
+  try {
+    await db.collection('dispoBuyerTasks').doc(taskId).delete();
+    showToast('Task deleted');
+    rerenderTaskView(mode, buyerId, openDealId);
+  } catch (e) { showToast('Failed: ' + e.message); }
+}
+async function loadBuyerTasksCard(buyerId) {
+  const body = document.getElementById('buyer-tasks-body');
+  if (!body) return;
+  try {
+    const snap = await db.collection('dispoBuyerTasks').where('buyerId', '==', buyerId).get();
+    const tasks = snap.docs.map(t => ({ id: t.id, ...t.data() }));
+    const open = tasks.filter(t => !t.done).sort((a, c) => String(a.dueDate || '9999').localeCompare(String(c.dueDate || '9999')) || tsStr(a.createdAt).localeCompare(tsStr(c.createdAt)));
+    const done = tasks.filter(t => t.done).sort((a, c) => tsStr(c.completedAt || c.createdAt).localeCompare(tsStr(a.completedAt || a.createdAt)));
+    const cnt = document.getElementById('buyer-tasks-count');
+    if (cnt) cnt.textContent = `(${open.length} open${done.length ? ` · ${done.length} done` : ''})`;
+    body.innerHTML = tasks.length
+      ? [...open, ...done].map(t => buyerTaskRowHtml(t, 'b', buyerId, true)).join('')
+      : '<div class="timeline-empty">No tasks yet — add the first follow-up below.</div>';
+  } catch (e) {
+    body.innerHTML = `<div class="timeline-empty">Could not load tasks (${esc(e.message)}).</div>`;
+  }
 }
 
 /* ================= 📞 DispoHub Dialer =================
