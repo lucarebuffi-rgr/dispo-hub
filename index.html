@@ -693,14 +693,19 @@ function closeStageMenu() {
   document.querySelectorAll('.stage-badge[data-open]').forEach(b => b.dataset.open = '');
 }
 function renderDeals() {
-  const list = stageFilter === 'all' ? deals : deals.filter(d => d.stage === stageFilter);
-  $('deals-pill').textContent = deals.length;
+  // Dead deals are archived, not listed: the board (lists + counts) only ever
+  // shows live deals. See renderDeadDeals() for the archive.
+  const liveDeals = deals.filter(d => d.stage !== 'dead');
+  const deadCount = deals.length - liveDeals.length;
+  const effFilter = stageFilter === 'dead' ? 'all' : stageFilter;
+  const list = effFilter === 'all' ? liveDeals : liveDeals.filter(d => d.stage === effFilter);
+  $('deals-pill').textContent = liveDeals.length;
   let html = `<div style="display:flex;justify-content:flex-end;margin-bottom:10px;"><button class="btn-gold" onclick="showDealForm()">+ Add Deal</button></div>
   <div class="stage-row">
-    <button class="stage-btn ${stageFilter === 'all' ? 'active' : ''}" data-stage="all">All <span class="count">${deals.length}</span></button>
-    ${DEAL_STAGES.map(s => {
-      const c = deals.filter(d => d.stage === s.id).length;
-      return `<button class="stage-btn ${stageFilter === s.id ? 'active' : ''}" data-stage="${s.id}">${s.label} <span class="count">${c}</span></button>`;
+    <button class="stage-btn ${effFilter === 'all' ? 'active' : ''}" data-stage="all">All <span class="count">${liveDeals.length}</span></button>
+    ${DEAL_STAGES.filter(s => s.id !== 'dead').map(s => {
+      const c = liveDeals.filter(d => d.stage === s.id).length;
+      return `<button class="stage-btn ${effFilter === s.id ? 'active' : ''}" data-stage="${s.id}">${s.label} <span class="count">${c}</span></button>`;
     }).join('')}
   </div>`;
   if (!list.length) {
@@ -739,6 +744,8 @@ function renderDeals() {
       </div>`;
     }).join('');
   }
+  // Secluded archive link — small, muted, below the board, never in the counts.
+  if (deadCount) html += `<div style="text-align:center;margin:22px 0 8px;"><button class="btn-ghost" style="font-size:12px;color:#5c6b82;border-color:#22385a;" onclick="renderDeadDeals()">🗄️ Dead Deals (${deadCount})</button></div>`;
   $('content').innerHTML = html;
   document.querySelectorAll('[data-stage]').forEach(b => b.onclick = e => { e.stopPropagation(); stageFilter = b.dataset.stage; renderDeals(); });
   // Fill offer counts
@@ -747,6 +754,36 @@ function renderDeals() {
     snap.docs.forEach(doc => { const o = doc.data(); counts[o.dealId] = (counts[o.dealId] || 0) + 1; });
     document.querySelectorAll('[data-offers]').forEach(el => { el.textContent = counts[el.dataset.offers] || 0; });
   });
+}
+
+/* ================= Dead Deals archive =================
+   Dead deals leave the board entirely (lists + counts) and live here.
+   Nothing is deleted: the deal doc, its buyers and its pulled-buyer links
+   all stay in Firestore. Restore puts the deal back on the board as
+   Ready to Market. */
+function renderDeadDeals() {
+  const dead = deals.filter(d => d.stage === 'dead')
+    .sort((a, b) => tsStr(b.updatedAt).localeCompare(tsStr(a.updatedAt)));
+  $('content').innerHTML = `<button class="back-btn" onclick="switchTab('deals')">← Back to deals</button>
+  <h2 style="font-size:19px;margin:0;">🗄️ Dead Deals <span style="color:#8a97a8;font-size:13px;font-weight:400;">(${dead.length})</span></h2>
+  <div class="addr-sub" style="margin:8px 0 14px;">Off the board, not deleted — buyers and pull history stay attached. Restore one to bring it back.</div>
+  ${dead.length ? dead.map(d => `
+    <div class="deal-card" onclick="openDeal('${d.id}')">
+      <div class="deal-row" style="display:flex;justify-content:space-between;align-items:center;gap:12px;">
+        <div style="flex:1;min-width:0;">
+          <div class="deal-top">
+            <span class="deal-addr">${esc(d.address || 'Untitled deal')}</span>
+            ${stageBadge(d.stage)}
+          </div>
+          <div class="deal-sub">${esc(d.city || '')}${d.city ? ', ' : ''}${esc(d.state || 'GA')} ${esc(d.zip || '')} · ${esc(d.beds || '—')}bd/${esc(d.baths || '—')}ba · ${esc(d.sqft ? (+d.sqft).toLocaleString() + ' sqft' : '—')}</div>
+        </div>
+        <button class="btn-gold" style="flex-shrink:0;" onclick="event.stopPropagation();restoreDeal('${d.id}')">↩️ Restore</button>
+      </div>
+    </div>`).join('') : '<div class="empty-state">No dead deals.</div>'}`;
+}
+async function restoreDeal(id) {
+  await logActivity(id, 'Restored from Dead Deals archive');
+  await setStage(id, 'under_contract'); // toasts, reloads, opens the deal
 }
 
 /* ================= Buyers view ================= */
@@ -1024,6 +1061,96 @@ function showDealForm(dealId, searchId) {
   </div>`;
   window.scrollTo(0, 0);
 }
+/* ================= Area auto-reuse: pulled buyers follow the area =================
+   When a NEW deal is created, buyers already pulled for the SAME AREA on an
+   earlier deal are linked to the new deal automatically — no fresh pull needed.
+   Same area = same city + same county (+ same state); county/state fall back
+   gracefully when either deal leaves them blank. (Pulls are address + radius,
+   and there is no client-side geocoder to test radius overlap, so city+county
+   is the tight proxy — same territory signal the buyer-matching code already
+   uses.) Property-type fit: the old pull's property types must include the new
+   deal's type family (Duplex/Triplex/Quad/Multi-Family are one family;
+   Condo/Townhome one family; Half Duplex counts as Multi-Family). A new
+   result doc is created per buyer (dealId = new deal, searchId kept from the
+   original pull, smartMatch copied EXACTLY as recorded — never recomputed).
+   Inactive buyers are skipped; a buyer already linked to the new deal is
+   never duplicated. Nothing is ever removed from the old deal or its buyers. */
+function ptypeFamily(t) {
+  const s = String(t || '').trim().toLowerCase();
+  if (!s) return '';
+  if (/duplex|triplex|\bquad\b|multi/.test(s)) return 'multi';
+  if (/single|sfr/.test(s)) return 'single';
+  if (/mobile|manufactured|\bmb\b/.test(s)) return 'mobile';
+  if (/\bland\b|\blot\b|acre/.test(s)) return 'land';
+  if (/condo|townhome|townhouse/.test(s)) return 'condo-town';
+  if (/commercial/.test(s)) return 'commercial';
+  return '';
+}
+function sameArea(a, b) {
+  const cityA = normStr(a.city), cityB = normStr(b.city);
+  if (!cityA || !cityB || cityA !== cityB) return false;
+  const stA = normStr(a.state), stB = normStr(b.state);
+  if (stA && stB && stA !== stB) return false;
+  const coA = normStr(a.county), coB = normStr(b.county);
+  if (coA && coB && coA !== coB) return false;
+  return true;
+}
+async function reuseAreaBuyers(newDealId, newDeal) {
+  try {
+    const [allResults, allSearches, existingSnap] = await Promise.all([
+      db.collection('dispoBuyerSearchResults').get(),
+      db.collection('dispoBuyerSearches').get(),
+      db.collection('dispoBuyerSearchResults').where('dealId', '==', newDealId).get()
+    ]);
+    const alreadyLinked = new Set(existingSnap.docs.map(doc => (doc.data() || {}).buyerId).filter(Boolean));
+    const searchById = {};
+    allSearches.docs.forEach(doc => { searchById[doc.id] = doc.data() || {}; });
+    const dealById = {};
+    deals.forEach(d => { dealById[d.id] = d; });
+    const wantFam = ptypeFamily(newDeal.propertyType);
+    const bySource = {}; // sourceDealId -> { addr, items: [{buyerId, smartMatch, searchId}] }
+    const seenBuyer = new Set();
+    allResults.docs.forEach(doc => {
+      const r = doc.data() || {};
+      if (!r.buyerId || alreadyLinked.has(r.buyerId) || seenBuyer.has(r.buyerId)) return;
+      const srcId = r.dealId || (r.searchId && searchById[r.searchId] ? (searchById[r.searchId].dealId || '') : '');
+      if (!srcId || srcId === newDealId) return;
+      const src = dealById[srcId];
+      if (!src || !sameArea(src, newDeal)) return;
+      // Property-type fit: the old pull's types must include the new deal's family.
+      // An unknown/blank pull type does not block the reuse — area match governs.
+      const pullTypes = (r.searchId && searchById[r.searchId] && Array.isArray(searchById[r.searchId].propertyTypes) && searchById[r.searchId].propertyTypes.length)
+        ? searchById[r.searchId].propertyTypes
+        : [src.propertyType || ''];
+      if (wantFam) {
+        const fams = pullTypes.map(ptypeFamily);
+        if (fams.length && !fams.includes('') && !fams.includes(wantFam)) return;
+      }
+      const b = buyers.find(x => x.id === r.buyerId);
+      if (!b || b.status === 'inactive') return;
+      seenBuyer.add(r.buyerId);
+      (bySource[srcId] = bySource[srcId] || { addr: src.address || 'Untitled deal', items: [] }).items.push({
+        buyerId: r.buyerId, smartMatch: r.smartMatch === true, searchId: r.searchId || ''
+      });
+    });
+    const sources = Object.entries(bySource);
+    if (!sources.length) return 0;
+    let total = 0;
+    for (const [srcId, src] of sources) {
+      for (const item of src.items) {
+        await db.collection('dispoBuyerSearchResults').add({
+          searchId: item.searchId, dealId: newDealId, buyerId: item.buyerId,
+          smartMatch: item.smartMatch,
+          reusedFromDealId: srcId, reusedFrom: src.addr,
+          createdAt: new Date().toISOString()
+        });
+        total++;
+      }
+      await logActivity(newDealId, `🔁 Reused ${src.items.length} buyer${src.items.length === 1 ? '' : 's'} from ${src.addr} (same area)`);
+    }
+    return total;
+  } catch (e) { console.error('area reuse failed', e); return 0; }
+}
 async function saveDealForm(id) {
   const v = k => ($('df-' + k) || {}).value?.trim() || '';
   const num = k => { const x = v(k).replace(/[^0-9.]/g, ''); return x === '' ? '' : +x; };
@@ -1063,7 +1190,11 @@ async function saveDealForm(id) {
       } catch (e) { console.error('search link failed', e); }
     }
     window.pendingDealSearchId = '';
-    showToast('Deal added');
+    // Area auto-reuse: buyers already pulled for this city/county on an
+    // earlier deal come along on the new deal. Never blocks creation.
+    let reused = 0;
+    try { reused = await reuseAreaBuyers(ref.id, rec); } catch (e) { console.error('area reuse failed', e); }
+    showToast(reused ? `Deal added — 🔁 reused ${reused} buyer${reused === 1 ? '' : 's'} from this area` : 'Deal added');
     await loadAll(); openDeal(ref.id);
   }
 }
@@ -1097,6 +1228,7 @@ async function openDeal(id) {
   } catch (e) { console.error('pulled buyers query failed', e); pulledBuyers = []; }
   const topRanked = pulledBuyers.filter(r => r.smartMatch === true);
   const otherPulled = pulledBuyers.filter(r => r.smartMatch !== true);
+  const reusedCount = pulledBuyers.filter(r => r.reusedFromDealId).length;
   const activity = await getActivity(id);
   const compsSnap = await db.collection('dispoComps').where('dealId', '==', id).get();
   const allComps = compsSnap.docs.map(c => ({ id: c.id, ...c.data() })).sort((a, b) => (+b.soldPrice || 0) - (+a.soldPrice || 0));
@@ -1251,7 +1383,7 @@ async function openDeal(id) {
         return `
         <div class="match-row"${b ? ` onclick="openBuyer('${b.id}', '${id}')" style="cursor:pointer;"` : ''}>
           <div class="match-info">
-            <div class="n">🏆 ${esc(nm)}${pipe ? ` <span style="font-size:11px;font-weight:700;color:${pipeColors[pipe] || '#8a97a8'};background:rgba(255,255,255,.06);border-radius:12px;padding:2px 8px;margin-left:4px;">${pipeLabels[pipe] || pipe}</span>` : ''}</div>
+            <div class="n">🏆 ${esc(nm)}${pb.reusedFrom ? ` <span title="Reused from ${esc(pb.reusedFrom)}" style="font-size:11px;font-weight:700;color:#e8b84b;background:rgba(232,184,75,.12);border-radius:12px;padding:2px 8px;margin-left:4px;">🔁 Reused</span>` : ''}${pipe ? ` <span style="font-size:11px;font-weight:700;color:${pipeColors[pipe] || '#8a97a8'};background:rgba(255,255,255,.06);border-radius:12px;padding:2px 8px;margin-left:4px;">${pipeLabels[pipe] || pipe}</span>` : ''}</div>
             ${person ? `<div class="w" style="color:#e8c476;">👤 ${esc(person)}</div>` : ''}
             <div class="w">${addr ? '📍 ' + esc(addr) : ''}${addr && price ? ' · ' : ''}${price ? '💰 ' + esc(price) : ''}${!addr && !price ? '—' : ''}</div>
             ${email ? `<div class="w">✉️ <a href="mailto:${esc(email)}" onclick="event.stopPropagation()" style="color:#7fb3ff;">${esc(email)}</a></div>` : ''}
@@ -1294,7 +1426,7 @@ async function openDeal(id) {
         <span class="toggle-arrow">▶</span> 📋 All Pulled Buyers <span style="color:#8a97a8;font-size:13px;font-weight:400;">(${otherPulled.length})</span>
       </h2>
       <div id="all-buyers-list" style="display:none;">
-      <div class="addr-sub">Every buyer from this deal's InvestorBase pulls.</div>
+      <div class="addr-sub">Every buyer from this deal's InvestorBase pulls${reusedCount ? ', plus 🔁 buyers reused from earlier deals in this area.' : '.'}</div>
       ${otherPulled.length ? otherPulled.map(pb => {
         const b = pb._buyer;
         const nm = (b && b.name) || pb.buyerName || 'Unknown buyer';
@@ -1310,7 +1442,7 @@ async function openDeal(id) {
         return `
         <div class="match-row"${b ? ` onclick="openBuyer('${b.id}', '${id}')" style="cursor:pointer;"` : ''}>
           <div class="match-info">
-            <div class="n">${esc(nm)}${pipe ? ` <span style="font-size:11px;font-weight:700;color:${pipeColors[pipe] || '#8a97a8'};background:rgba(255,255,255,.06);border-radius:12px;padding:2px 8px;margin-left:4px;">${pipeLabels[pipe] || pipe}</span>` : ''}</div>
+            <div class="n">${esc(nm)}${pb.reusedFrom ? ` <span title="Reused from ${esc(pb.reusedFrom)}" style="font-size:11px;font-weight:700;color:#e8b84b;background:rgba(232,184,75,.12);border-radius:12px;padding:2px 8px;margin-left:4px;">🔁 Reused</span>` : ''}${pipe ? ` <span style="font-size:11px;font-weight:700;color:${pipeColors[pipe] || '#8a97a8'};background:rgba(255,255,255,.06);border-radius:12px;padding:2px 8px;margin-left:4px;">${pipeLabels[pipe] || pipe}</span>` : ''}</div>
             ${person ? `<div class="w" style="color:#e8c476;">👤 ${esc(person)}</div>` : ''}
             <div class="w">${addr ? '📍 ' + esc(addr) : ''}${addr && price ? ' · ' : ''}${price ? '💰 ' + esc(price) : ''}${!addr && !price ? '—' : ''}</div>
             ${email ? `<div class="w">✉️ <a href="mailto:${esc(email)}" onclick="event.stopPropagation()" style="color:#7fb3ff;">${esc(email)}</a></div>` : ''}
@@ -2331,10 +2463,11 @@ async function pushResultToBuyers(resultId) {  const doc = await db.collection('
 function pickDeal(title, cb) {
   const ov = document.createElement('div');
   ov.style.cssText = 'position:fixed;inset:0;z-index:999;background:rgba(0,0,0,.6);display:flex;align-items:flex-end;justify-content:center;';
+  const liveDeals = deals.filter(d => d.stage !== 'dead'); // never link a buyer to a dead deal
   ov.innerHTML = `<div style="background:#10233d;border:1px solid #22385a;border-radius:16px 16px 0 0;width:100%;max-width:560px;max-height:70vh;overflow:auto;padding:18px;">
     <h3 style="margin:0 0 4px;font-size:17px;">${esc(title)}</h3>
     <div class="addr-sub" style="margin-bottom:12px;">Pick the deal to attach to.</div>
-    ${deals.length ? deals.map(d => `<button class="btn-ghost" style="width:100%;text-align:left;margin-bottom:8px;" data-dealpick="${d.id}">📍 ${esc(d.address || 'Untitled deal')}${d.city ? '<span style="color:#8a97a8;"> · ' + esc(d.city) + '</span>' : ''}</button>`).join('') : '<div class="timeline-empty">No deals yet.</div>'}
+    ${liveDeals.length ? liveDeals.map(d => `<button class="btn-ghost" style="width:100%;text-align:left;margin-bottom:8px;" data-dealpick="${d.id}">📍 ${esc(d.address || 'Untitled deal')}${d.city ? '<span style="color:#8a97a8;"> · ' + esc(d.city) + '</span>' : ''}</button>`).join('') : '<div class="timeline-empty">No deals yet.</div>'}
     <button class="btn-ghost" style="width:100%;margin-top:4px;" id="deal-picker-cancel">Cancel</button>
   </div>`;
   document.body.appendChild(ov);
