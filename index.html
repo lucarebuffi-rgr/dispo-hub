@@ -969,6 +969,8 @@ function showDealForm(dealId, searchId) {
         ${fld('arv', 'ARV $', d.arv, 'number')}
         ${fld('rehabFlip', 'Est. flip rehab $', d.rehabFlip, 'number')}
         ${fld('rehabRentReady', 'Est. rent-ready rehab $', d.rehabRentReady, 'number')}
+        ${fld('rentLow', 'Est. rent low $ (overrides RentCast)', d.rentLow, 'number')}
+        ${fld('rentHigh', 'Est. rent high $ (overrides RentCast)', d.rentHigh, 'number')}
         ${fld('askPrice', 'Ask price $', d.askPrice, 'number')}
         ${fld('assignmentFee', 'Assignment fee target $', d.assignmentFee, 'number')}
         ${fld('closeByDate', 'Close-by / contingency date', d.closeByDate, 'date')}
@@ -1029,6 +1031,7 @@ async function saveDealForm(id) {
     address: v('address'), city: v('city'), state: v('state') || 'GA', zip: v('zip'), county: v('county'),
     propertyType: v('propertyType'), beds: num('beds'), baths: num('baths'), sqft: num('sqft'), yearBuilt: num('yearBuilt'), lotSize: v('lotSize'),
     contractPrice: num('contractPrice'), arv: num('arv'), rehabFlip: num('rehabFlip'), rehabRentReady: num('rehabRentReady'),
+    rentLow: num('rentLow'), rentHigh: num('rentHigh'),
     askPrice: num('askPrice'), assignmentFee: num('assignmentFee'), closeByDate: v('closeByDate'),
     sellerName: v('sellerName'), sellerPhone: v('sellerPhone'), notes: $('df-notes').value.trim(),
     compRoof: v('compRoof'), compHvac: v('compHvac'), compPlumbing: v('compPlumbing'), compCosmetic: v('compCosmetic'),
@@ -1153,6 +1156,8 @@ async function openDeal(id) {
         <div class="num-box"><div class="l">ARV</div><div class="v dbl-edit" data-field="arv" ondblclick="editDealNumber('${d.id}','arv',this)" title="Double-click to edit">${money(d.arv)}</div></div>
         <div class="num-box"><div class="l">Flip Rehab</div><div class="v dbl-edit" data-field="rehabFlip" ondblclick="editDealNumber('${d.id}','rehabFlip',this)" title="Double-click to edit">${money(d.rehabFlip)}</div></div>
         <div class="num-box"><div class="l">Rent-Ready</div><div class="v dbl-edit" data-field="rehabRentReady" ondblclick="editDealNumber('${d.id}','rehabRentReady',this)" title="Double-click to edit">${money(d.rehabRentReady)}</div></div>
+        <div class="num-box"><div class="l">Rent Low</div><div class="v dbl-edit" data-field="rentLow" ondblclick="editDealNumber('${d.id}','rentLow',this)" title="Double-click to edit">${money(d.rentLow)}</div></div>
+        <div class="num-box"><div class="l">Rent High</div><div class="v dbl-edit" data-field="rentHigh" ondblclick="editDealNumber('${d.id}','rentHigh',this)" title="Double-click to edit">${money(d.rentHigh)}</div></div>
         <div class="num-box"><div class="l">Ask</div><div class="v green dbl-edit" data-field="askPrice" ondblclick="editDealNumber('${d.id}','askPrice',this)" title="Double-click to edit">${money(d.askPrice)}</div></div>
         <div class="num-box"><div class="l">Fee Target</div><div class="v">${money(d.assignmentFee)}</div></div>
         <div class="num-box"><div class="l">ARV − Contract</div><div class="v ${spread > 0 ? 'green' : ''}">${spread != null ? money(spread) : '—'}</div></div>
@@ -1395,7 +1400,7 @@ async function setStage(id, stage) {
   showToast(`Stage → ${STAGE_MAP[stage].label}`);
   await loadAll(); openDeal(id);
 }
-/* Double-click to edit deal numbers (Contract, ARV, Flip Rehab, Rent-Ready, Ask). */
+/* Double-click to edit deal numbers (Contract, ARV, Flip Rehab, Rent-Ready, Rent Low/High, Ask). */
 function editDealNumber(dealId, field, el) {
   if (el.querySelector('input')) return; // already editing
   const d = deals.find(x => x.id === dealId);
