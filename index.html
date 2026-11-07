@@ -2542,13 +2542,16 @@ async function unlinkBuyerFromDeal(buyerId, dealId) {
   const b = buyers.find(x => x.id === buyerId);
   showToast('Removing from this deal…');
   try {
+    // Exclusion FIRST, then the link deletes: if any write fails, nothing has
+    // silently changed — a failed remove leaves the buyer on the deal (and the
+    // error honest), never a link gone with no exclusion behind it.
+    await db.collection('dispoDealExclusions').add({ dealId, buyerId, createdAt: new Date().toISOString() });
     const snap = await db.collection('dispoBuyerSearchResults').where('dealId', '==', dealId).get();
     for (const doc of snap.docs) {
       if ((doc.data() || {}).buyerId === buyerId) {
         await db.collection('dispoBuyerSearchResults').doc(doc.id).delete();
       }
     }
-    await db.collection('dispoDealExclusions').add({ dealId, buyerId, createdAt: new Date().toISOString() });
     // Clear this deal's pipeline + SMS state on the buyer doc (buyer record stays).
     if (b && ((b.dealPipeline && b.dealPipeline[dealId] != null) || (b.smsStepByDeal && b.smsStepByDeal[dealId] != null))) {
       const pipe = Object.assign({}, b.dealPipeline); delete pipe[dealId];
