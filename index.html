@@ -1097,12 +1097,15 @@ function sameArea(a, b) {
 }
 async function reuseAreaBuyers(newDealId, newDeal) {
   try {
-    const [allResults, allSearches, existingSnap] = await Promise.all([
+    const [allResults, allSearches, existingSnap, exclSnap] = await Promise.all([
       db.collection('dispoBuyerSearchResults').get(),
       db.collection('dispoBuyerSearches').get(),
-      db.collection('dispoBuyerSearchResults').where('dealId', '==', newDealId).get()
+      db.collection('dispoBuyerSearchResults').where('dealId', '==', newDealId).get(),
+      db.collection('dispoDealExclusions').where('dealId', '==', newDealId).get()
     ]);
     const alreadyLinked = new Set(existingSnap.docs.map(doc => (doc.data() || {}).buyerId).filter(Boolean));
+    // Buyers removed from this deal stay removed — reuse never re-adds them.
+    const excluded = new Set(exclSnap.docs.map(doc => (doc.data() || {}).buyerId).filter(Boolean));
     const searchById = {};
     allSearches.docs.forEach(doc => { searchById[doc.id] = doc.data() || {}; });
     const dealById = {};
@@ -1112,7 +1115,7 @@ async function reuseAreaBuyers(newDealId, newDeal) {
     const seenBuyer = new Set();
     allResults.docs.forEach(doc => {
       const r = doc.data() || {};
-      if (!r.buyerId || alreadyLinked.has(r.buyerId) || seenBuyer.has(r.buyerId)) return;
+      if (!r.buyerId || alreadyLinked.has(r.buyerId) || excluded.has(r.buyerId) || seenBuyer.has(r.buyerId)) return;
       const srcId = r.dealId || (r.searchId && searchById[r.searchId] ? (searchById[r.searchId].dealId || '') : '');
       if (!srcId || srcId === newDealId) return;
       const src = dealById[srcId];
@@ -1416,6 +1419,7 @@ async function openDeal(id) {
             ${bid ? iconBtn(`openSingleEmail('${bid}')`, 'Email this buyer', '📧🚀', !email) : ''}
             ${bid ? iconBtn(`openSingleSms('${bid}')`, 'Text this buyer', '💬🚀', !(b && b.phone)) : ''}
             ${bid ? iconBtn(`startDialer('${id}','${bid}')`, smsSent ? 'Call this buyer' : 'Dialer locked — send SMS #1 first', smsSent ? '📞' : '🔒', !smsSent || !(b && b.phone)) : ''}
+            ${pb.buyerId ? `<button onclick="event.stopPropagation();armConfirm(this, () => unlinkBuyerFromDeal('${pb.buyerId}', '${id}'))" title="Remove from this deal (buyer stays in the database)" style="background:rgba(217,83,79,.12);border:1px solid rgba(217,83,79,.4);border-radius:10px;height:38px;padding:0 10px;font-size:13px;cursor:pointer;white-space:nowrap;">➖ Remove</button>` : ''}
           </div>
         </div>`;
       }).join('') : '<div class="timeline-empty">No Smart Match buyers on this pull yet.</div>'}
@@ -1471,7 +1475,10 @@ async function openDeal(id) {
               </div>`;
             })()}
           </div>
-          ${b && b.phone ? `<a class="call-link match-call" href="tel:${digitsOnly(b.phone)}" onclick="event.stopPropagation();logDispoDialClick('${b.id}','${d.id}')">📞</a>` : `<span style="font-size:12px;color:#5c6b82;">${b ? 'no phone' : ''}</span>`}
+          <div style="display:flex;gap:6px;align-items:center;flex-shrink:0;" onclick="event.stopPropagation()">
+            ${b && b.phone ? `<a class="call-link match-call" href="tel:${digitsOnly(b.phone)}" onclick="event.stopPropagation();logDispoDialClick('${b.id}','${d.id}')">📞</a>` : `<span style="font-size:12px;color:#5c6b82;">${b ? 'no phone' : ''}</span>`}
+            ${pb.buyerId ? `<button onclick="event.stopPropagation();armConfirm(this, () => unlinkBuyerFromDeal('${pb.buyerId}', '${id}'))" title="Remove from this deal (buyer stays in the database)" style="background:rgba(217,83,79,.12);border:1px solid rgba(217,83,79,.4);border-radius:10px;height:38px;padding:0 10px;font-size:13px;cursor:pointer;white-space:nowrap;">➖ Remove</button>` : ''}
+          </div>
         </div>`;
       }).join('') : '<div class="timeline-empty">No other pulled buyers — tap 🔍 Search For Buyers above to run a pull.</div>'}
       </div>
@@ -2448,9 +2455,17 @@ async function pushResultToBuyers(resultId) {  const doc = await db.collection('
   }
   const sdoc0 = r.searchId ? await db.collection('dispoBuyerSearches').doc(r.searchId).get() : null;
   const autoDealId = sdoc0 && sdoc0.exists ? (sdoc0.data().dealId || '') : '';
+  // A buyer removed from this deal stays removed: never auto-link them back.
+  let linkDealId = autoDealId;
+  if (linkDealId) {
+    try {
+      const xsnap = await db.collection('dispoDealExclusions').where('dealId', '==', linkDealId).get();
+      if (xsnap.docs.some(doc => (doc.data() || {}).buyerId === buyerId)) linkDealId = '';
+    } catch (e) { console.error('exclusion check failed', e); }
+  }
   await db.collection('dispoBuyerSearchResults').doc(resultId).set(
-    autoDealId ? { buyerId, dealId: autoDealId } : { buyerId }, { merge: true });
-  showToast((existing ? 'Linked to existing buyer' : 'Buyer added to Buyers DB') + (autoDealId ? ' — linked to deal' : ''));
+    linkDealId ? { buyerId, dealId: linkDealId } : { buyerId }, { merge: true });
+  showToast((existing ? 'Linked to existing buyer' : 'Buyer added to Buyers DB') + (linkDealId ? ' — linked to deal' : ''));
   await loadAll();
   const sdoc = await db.collection('dispoBuyerSearches').doc(r.searchId).get();
   if (sdoc.exists) openBuyerSearch(r.searchId);
@@ -2480,6 +2495,7 @@ async function linkResultToDeal(resultId) {
     await db.collection('dispoBuyerSearchResults').doc(resultId).set({ dealId, updatedAt: new Date().toISOString() }, { merge: true });
     showToast('Buyer linked to deal');
     const doc = await db.collection('dispoBuyerSearchResults').doc(resultId).get();
+    if (doc.exists && doc.data().buyerId) await clearDealExclusion(doc.data().buyerId, dealId); // manual link overrides a removal
     if (doc.exists && doc.data().searchId) openBuyerSearch(doc.data().searchId);
   });
 }
@@ -2490,6 +2506,7 @@ async function linkSearchToDeal(searchId) {
     for (const doc of rsnap.docs) {
       if (doc.data().buyerId) {
         await db.collection('dispoBuyerSearchResults').doc(doc.id).set({ dealId, updatedAt: new Date().toISOString() }, { merge: true });
+        await clearDealExclusion(doc.data().buyerId, dealId); // manual link overrides a removal
         n++;
       }
     }
@@ -2500,8 +2517,50 @@ async function linkSearchToDeal(searchId) {
 async function linkBuyerToDeal(buyerId) {
   pickDeal('Link buyer to deal', async (dealId) => {
     await db.collection('dispoBuyerSearchResults').add({ searchId: '', dealId, buyerId, createdAt: new Date().toISOString() });
+    await clearDealExclusion(buyerId, dealId); // manual link is an explicit override
     showToast('Buyer linked to deal');
   });
+}
+
+/* ================= Remove a buyer from ONE deal (unlink only) =================
+   Deletes ONLY the dispoBuyerSearchResults link(s) for that deal+buyer and
+   records a per-deal exclusion in `dispoDealExclusions` so the removal
+   STICKS: area auto-reuse will not re-add them, and a re-pull will not
+   auto-link them to this deal again. The dispoBuyers doc is never deleted —
+   only its per-deal pipeline/SMS state for this deal is cleared (same
+   map-key rewrite pattern setBuyerDealPipeline uses). A MANUAL link via the
+   deal picker is an explicit override: it clears the exclusion. */
+async function clearDealExclusion(buyerId, dealId) {
+  try {
+    const snap = await db.collection('dispoDealExclusions').where('dealId', '==', dealId).get();
+    for (const doc of snap.docs) {
+      if ((doc.data() || {}).buyerId === buyerId) await db.collection('dispoDealExclusions').doc(doc.id).delete();
+    }
+  } catch (e) { console.error('clear exclusion failed', e); }
+}
+async function unlinkBuyerFromDeal(buyerId, dealId) {
+  const b = buyers.find(x => x.id === buyerId);
+  showToast('Removing from this deal…');
+  try {
+    const snap = await db.collection('dispoBuyerSearchResults').where('dealId', '==', dealId).get();
+    for (const doc of snap.docs) {
+      if ((doc.data() || {}).buyerId === buyerId) {
+        await db.collection('dispoBuyerSearchResults').doc(doc.id).delete();
+      }
+    }
+    await db.collection('dispoDealExclusions').add({ dealId, buyerId, createdAt: new Date().toISOString() });
+    // Clear this deal's pipeline + SMS state on the buyer doc (buyer record stays).
+    if (b && ((b.dealPipeline && b.dealPipeline[dealId] != null) || (b.smsStepByDeal && b.smsStepByDeal[dealId] != null))) {
+      const pipe = Object.assign({}, b.dealPipeline); delete pipe[dealId];
+      const steps = Object.assign({}, b.smsStepByDeal); delete steps[dealId];
+      await db.collection('dispoBuyers').doc(buyerId).set({ dealPipeline: pipe, smsStepByDeal: steps }, { merge: true });
+      b.dealPipeline = pipe; b.smsStepByDeal = steps;
+    }
+    await logActivity(dealId, `➖ Removed ${(b && b.name) || 'buyer'} from this deal (stays in Buyers DB)`);
+    showToast('Removed from this deal — buyer stays in the database');
+  } catch (e) { showToast('Remove failed: ' + e.message); return; }
+  await loadAll();
+  openDeal(dealId);
 }
 
 /* ================= KPI dashboard ================= */
@@ -3921,7 +3980,7 @@ function openBuyer(id, fromDealId) {
         Added: ${esc(fmtDate(b.dateAdded))} · Verified: ${esc(fmtDate(b.lastVerified))}
       </div>
       ${b.notes ? `<div class="section-label">Notes</div><div style="font-size:14px;color:#aeb9c7;line-height:1.6;white-space:pre-wrap;">${esc(b.notes)}</div>` : ''}
-      <div style="margin-top:18px;display:flex;gap:10px;flex-wrap:wrap;"><button class="btn-ghost" onclick='showBuyerForm(${JSON.stringify(b.id)})'>✏️ Edit Buyer</button><button class="btn-ghost" onclick="linkBuyerToDeal('${b.id}')">🔗 Link to Deal</button></div>
+      <div style="margin-top:18px;display:flex;gap:10px;flex-wrap:wrap;"><button class="btn-ghost" onclick='showBuyerForm(${JSON.stringify(b.id)})'>✏️ Edit Buyer</button><button class="btn-ghost" onclick="linkBuyerToDeal('${b.id}')">🔗 Link to Deal</button>${buyerReturnDealId ? `<button class="btn-ghost" style="color:#e07a77;border-color:rgba(217,83,79,.4);" title="Unlinks this buyer from this deal only — the buyer stays in the database" onclick="armConfirm(this, () => unlinkBuyerFromDeal('${b.id}', '${buyerReturnDealId}'))">➖ Remove from this deal</button>` : ''}</div>
     </div>
     <div class="detail-card">
       <h2 style="font-size:18px;">✅ Follow-up Tasks <span id="buyer-tasks-count" style="color:#8a97a8;font-size:13px;font-weight:400;"></span></h2>
