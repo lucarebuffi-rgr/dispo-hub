@@ -2724,17 +2724,20 @@ let dialer = null; // {dealId, queue:[{buyer,score,why}], idx, outcomes:{}}
 async function startDialer(dealId, onlyBuyerId) {
   const d = deals.find(x => x.id === dealId);
   if (!d) return;
-  // Call session runs ONLY on this deal's InvestorBase-pulled buyers (no local auto-matching)
+  // Call session runs on ALL of this deal's InvestorBase-pulled buyers
+  // (no local auto-matching): Smart Match first, then the rest, in pull order.
   let queue = [];
   try {
     const psnap = await db.collection('dispoBuyerSearchResults').where('dealId', '==', dealId).get();
+    const seen = new Set();
     queue = psnap.docs.map(doc => ({ id: doc.id, ...doc.data() }))
-      .sort((a, b) => tsStr(a.createdAt).localeCompare(tsStr(b.createdAt))) // InvestorBase rank order
-      .filter(r => r.smartMatch === true) // Top Ranked: InvestorBase Smart Match only
+      .sort((a, b) => ((a.smartMatch === true ? 0 : 1) - (b.smartMatch === true ? 0 : 1))
+        || tsStr(a.createdAt).localeCompare(tsStr(b.createdAt))) // Smart Match first, then InvestorBase rank order
       .map(r => {
         const b = r.buyerId ? (buyers.find(x => x.id === r.buyerId) || null) : null;
-        if (!b) return null;
-        const why = ['🏆 Smart Match · Pulled from InvestorBase'];
+        if (!b || seen.has(b.id)) return null; // one session entry per buyer (first result wins — Smart Match first)
+        seen.add(b.id);
+        const why = [r.smartMatch === true ? '🏆 Smart Match · Pulled from InvestorBase' : '📋 Pulled from InvestorBase'];
         const baddr = b.boughtPropertyAddress || r.boughtPropertyAddress || r.purchaseAddress || '';
         const bprice = b.boughtPropertyPrice || r.boughtPropertyPrice || (r.soldPrice ? String(r.soldPrice) : '');
         if (baddr || bprice) why.push('🏠 Bought: ' + baddr + (baddr && bprice ? ' for ' : '') + bprice);
@@ -2742,7 +2745,7 @@ async function startDialer(dealId, onlyBuyerId) {
       }).filter(Boolean);
   } catch (e) { queue = []; }
   if (onlyBuyerId) queue = queue.filter(q => q.buyer && q.buyer.id === onlyBuyerId);
-  if (!queue.length) { showToast(onlyBuyerId ? 'Buyer not available for calling' : 'No Smart Match buyers on this deal yet'); return; }
+  if (!queue.length) { showToast(onlyBuyerId ? 'Buyer not available for calling' : 'No pulled buyers on this deal yet'); return; }
   dialer = { dealId, queue, idx: 0, outcomes: {} };
   renderDealDialer();
 }
